@@ -23,7 +23,7 @@ import { createRequire } from "module";
 // Resolve the decoder deps from the CURRENT WORKING DIR's node_modules (so this
 // can run against the banana_split _scratch toolchain while living in the bundle).
 const cwdRequire = createRequire(path.join(process.cwd(), "x.js"));
-const { setZXingModuleOverrides, readBarcodes } =
+const { setZXingModuleOverrides, readBarcodesFromImageData } =
   await import(pathToFileURL(cwdRequire.resolve("zxing-wasm/reader")));
 const { PNG } = await import(pathToFileURL(cwdRequire.resolve("pngjs")));
 
@@ -44,7 +44,7 @@ const KNOWN = {
   "qr_easy_3of5_seedphrase_ECH.png": { version: 10, ecLevel: "H", note: "seed-phrase sized; scans on everything (control)" },
 };
 
-const OPTS = { formats: ["QRCode"], tryHarder: true, tryDownscale: false };
+const OPTS = { formats: ["QRCode"], tryHarder: true };
 const files = fs.readdirSync(IMAGES).filter(f => f.endsWith(".png")).sort();
 const manifest = [];
 
@@ -53,13 +53,13 @@ for (const f of files) {
   const sha256 = crypto.createHash("sha256").update(buf).digest("hex");
   const png = PNG.sync.read(buf);
   const img = new ImageData(new Uint8ClampedArray(png.data), png.width, png.height);
-  const res = await readBarcodes(img, OPTS);
+  const res = await readBarcodesFromImageData(img, OPTS);
   const r = res[0];
   if (!r || !r.text) { console.error(`!! ${f}: NO DECODE`); continue; }
 
   const ladder = /qr_ladder_v(\d+)\.png/.exec(f);
   const version = KNOWN[f]?.version ?? (ladder ? +ladder[1] : null);
-  const ecLevel = KNOWN[f]?.ecLevel ?? (r.ecLevel || null);
+  const ecLevel = KNOWN[f]?.ecLevel ?? (r.eccLevel || null);
   const modules = version ? version * 4 + 17 : null;
 
   const expectedFile = f.replace(/\.png$/, ".txt");

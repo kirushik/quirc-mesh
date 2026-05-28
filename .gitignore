@@ -2,3 +2,21 @@ node_modules/
 .npm-cache/
 dist/
 *.log
+
+# Sandbox / editor / shell artifacts that leak into the working dir
+.bash_profile
+.bashrc
+.gitconfig
+.profile
+.zprofile
+.zshrc
+.ripgreprc
+.idea
+.vscode
+.mcp.json
+.claude/
+.gitmodules
+.tool-versions
+
+# Synthetic / generated test artifacts (regenerable; not ground truth)
+test-vectors/distorted/
