@@ -77,3 +77,35 @@ Reading order for the project: `README.md` → `PRD.md` → `docs/PRIOR_ART.md` 
   the target to turn green: low/mid rungs at M1, all 10 incl. v37/v40 at M2.
 - **Wasm reader path:** `node_modules/zxing-wasm/dist/reader/zxing_reader.wasm` (used by the
   oracle and, later, the camera-harness side-by-side baseline).
+
+---
+
+## M1 — quirc pipeline ported to JS (done; AC-1 fully met)
+
+Modules: `errors, perspective, version_db, gf, rs, binarize, region, finder, sample,
+decode, index`. Unit tests: `version_db`, `rs` (GF inverses + independent BCH(15,5)
+encoder feeding `correctFormat`), `perspective` (corner mapping + map∘unmap identity).
+Run units with `npm test`; clean-image integration with `npm run harness`.
+
+- **Region label width is the real high-version blocker, NOT sampling drift.** Stock quirc
+  caps regions at 254 (a `uint8` label-map limitation). Dense v30-v40 codes create >254
+  black connected-components *before the third finder is labeled*, so detection finds only 2
+  capstones → 0 grids → no decode. Verified: v40 created exactly 254 regions, 2 capstones.
+  **Fix:** `binarize` returns a `Uint16Array` label/pixel buffer and `region.MAX_REGIONS` =
+  65534 (quirc's own internal `uint16` branch). After this, clean v40 detects + decodes.
+  - **Consequence for the project thesis:** on *clean, rectilinear* images a single
+    homography (+ quirc's jiggle) is sufficient through v40 — `harness/run.mjs` is **10/10**
+    at M1, so **AC-1 is already met before the mesh exists.** The mesh (M2) is therefore
+    needed *specifically* for camera/perspective distortion (AC-2/AC-3), which is exactly
+    what PRIOR_ART predicted. This reframes M2's clean-image exit as already-satisfied; the
+    mesh's value must be proven on the **synthetic-distortion** harness (built early in M2 as
+    the red target) and the physical camera test.
+- **rint vs Math.round:** `perspective.rint` implements round-half-to-even to match C's
+  `rint()`; ordinary `Math.round` ties differently and could shift a sampled pixel by 1.
+- **EC level reported as a letter** (`ECC_LETTER[eccLevel]`) at the API; internally the M=0,
+  L=1, H=2, Q=3 integer order is preserved end-to-end.
+- **Mirror retry:** `decode()` retries a transposed matrix (quirc_flip) if the first parse
+  fails — cheap insurance for mirrored captures. Not exercised by the clean corpus.
+- **`node --test` needs file globs** (`test/*.test.js`), not a bare `test/` dir, on Node 22.
+- **Clean-image latency (Node, informational):** ~8-33 ms/decode v7-v40. Comfortably within
+  the AC-6 budget; real measurement is the camera path (M5).
