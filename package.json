@@ -1,7 +1,10 @@
 {
   "name": "quirc-mesh",
   "version": "0.1.0",
-  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com:kirushik/quirc-mesh.git"
+  },
   "type": "module",
   "description": "Small auditable pure-JS QR decoder that reads high-version (v20-v40) codes from a camera, via piecewise alignment-pattern mesh sampling. Fork of dlbeer/quirc.",
   "license": "ISC",
