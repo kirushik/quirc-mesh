@@ -263,3 +263,23 @@ The property for a backup tool: **null or the exact correct payload, never a wro
   QR's RS minimum distance makes it astronomically unlikely; and Banana Split's wire format has
   its own authenticated-integrity backstop above the QR layer (PRD / ALGORITHM.md §6). We do not
   add structural gates that would trade recall for a risk RS already covers.
+
+---
+
+## M6 — Package + license (done; integration left to the user)
+
+- **LICENSE** (ISC) drafted, preserving quirc's original notice (Daniel Beer, 2010-2012) as a
+  derivative work. Copyright holder: **Kirill Pimenov (@kirushik)**.
+- **package.json** made importable: `exports`/`main`/`module` -> `src/index.js`, `types` ->
+  `src/index.d.ts`, `sideEffects:false`, `files:[src, LICENSE, README]`, `engines.node>=18`,
+  `version 0.1.0`, keywords. **`private:true` is kept** as a publish guard — flip to `false` (and
+  add a `repository`) when ready to `npm publish`. No GitHub remote added (deliberate, per user).
+- **src/index.d.ts**: TypeScript types for the public API (`decode`/`decodeAll`/`decodeDebug`,
+  `DecodeResult`, `DecodeOptions`) so consumers (e.g. Banana Split) get typings. Pure ESM, no
+  runtime deps, runs in browser + Node >=18.
+- **README** updated: added Usage/API; replaced the stale "no decoder yet" Status with the met
+  acceptance criteria.
+- **Banana Split integration** is intentionally NOT done here (separate repo). Usage: import
+  `decode(imageData, { mesh:true, adaptive:true })` on the v2 recovery path; it returns the
+  base45 alphanumeric payload string (== the QR-layer text) or null. Coordinate with
+  `banana_split/V2_DESIGN.md` §8.3.

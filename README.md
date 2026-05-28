@@ -10,6 +10,32 @@ Target consumer: **[Banana Split](https://github.com/paritytech/banana_split)** 
 
 Banana Split's v2 format can pack large secrets into single QR codes per shard, but those codes reach v37–v40 (165×165–177×177 modules). Every pure-JS decoder we tried reads such codes fine from a *clean PNG* but **fails from a camera**, because they map the whole code with one homography anchored on 3 finder patterns + at most one alignment pattern. A v40 code carries ~46 alignment patterns precisely because one homography cannot survive lens/paper distortion across that span. `zxing-cpp` (C++→WASM) is the only engine we found that reads our worst v40 from the laptop webcam — but it's a ~1 MB opaque blob. quirc-mesh aims to deliver the same capability in a tiny, auditable codebase, **ideally in pure JS so no WASM is needed at all**.
 
+## Usage
+
+```js
+import { decode } from "quirc-mesh";
+
+// imageData: { data: Uint8ClampedArray (RGBA), width, height }
+// e.g. canvas.getContext("2d").getImageData(...) in a browser, or pngjs in Node.
+const result = decode(imageData);
+if (result) {
+  console.log(result.text, "v" + result.version, result.ecLevel);
+} else {
+  // no decode — fail-closed: quirc-mesh returns null rather than a wrong payload
+}
+```
+
+Options — `decode(imageData, { mesh, adaptive })`:
+- **`mesh`** (default `true`): piecewise alignment-pattern mesh sampling — the
+  high-version-from-camera capability. `false` falls back to a single homography (quirc-equivalent).
+- **`adaptive`** (default `false`): local block binarization for uneven lighting. Enable for
+  **webcam** frames; leave off for clean scans (global Otsu is exact there).
+
+Returns `{ text, bytes, version, ecLevel, mask, dataType, eci, corners }` or `null`. Also exported:
+`decodeAll` (all codes in a frame) and `decodeDebug` (adds detection diagnostics). Pure ESM, runs
+in browsers and Node ≥18, **no runtime dependencies, no WASM**. Live webcam demo: `harness/camera.html`
+(`npm run serve`).
+
 ## Start here (reading order)
 
 1. **`PRD.md`** — what we're building, goals, non-goals, success criteria, acceptance tests.
@@ -54,7 +80,18 @@ quirc-mesh/
 
 ## Status
 
-Spec/handoff bundle only. No decoder implemented yet. Begin at `IMPLEMENTATION_PLAN.md` §Milestone 1.
+**Working pure-JS decoder** (`src/`). Acceptance criteria met:
+
+- **AC-1** clean v7–v40 byte-exact — 10/10 (`npm run harness`).
+- **AC-2** the printed **v40** reads from the Framework 13 1080p webcam in **Chrome and Firefox**,
+  byte-exact, at 3.4–5.0 px/module (the case stock quirc/jsQR/zxing-js fail).
+- **AC-4** fail-closed — **0 wrong reads across 900 fuzz trials** (`npm run fuzz`).
+- **AC-5** ~1.9 kLOC, no runtime deps.
+- **AC-6** pure-JS, **~49 ms/frame** p90 for v40 — ~20× under the responsiveness bar, so **no WASM**.
+
+Unit + integration suite: `npm test` (21 tests). Full build log and every design decision are in
+**`docs/NOTES.md`**. Remaining: optional finder-grouping robustness for extreme close-up/tilt, and
+wiring into Banana Split's v2 recovery path.
 
 ## A note on git
 
