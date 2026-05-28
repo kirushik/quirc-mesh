@@ -7,9 +7,32 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import { decode } from "../src/index.js";
+import { buildControlGrid } from "../src/alignment.js";
+import { perspectiveSetup } from "../src/perspective.js";
 
 const require = createRequire(import.meta.url);
 const { PNG } = require("pngjs");
+
+// Guards the near-full-frame hang: an ill-conditioned grid (near-collinear clutter
+// capstones) implies a huge module size, and locateApat's window scales with it —
+// previously a multi-second scan per pattern. buildControlGrid must reject such a
+// geometrically-impossible grid fast (mesh sampler then falls back), never scan it.
+test("degenerate grid (huge implied module size) is rejected fast, not scanned", () => {
+  const w = 320, h = 320;
+  const q = { w, h, pixels: new Uint16Array(w * h), regions: [], capstones: [], grids: [] };
+  const gs = 117; // v25
+  const span = gs - 7;
+  for (const M of [200, 600]) { // px/module: code many times larger than the frame
+    const rect = [{ x: 0, y: 0 }, { x: span * M, y: 0 }, { x: span * M, y: span * M }, { x: 0, y: span * M }];
+    const c = perspectiveSetup(rect, span, span);
+    const qr = { gridSize: gs, c, align: { x: 0, y: 0 }, caps: [0, 1, 2], capSnap: [{ c }, { c }, { c }] };
+    const t0 = performance.now();
+    const control = buildControlGrid(q, qr);
+    const ms = performance.now() - t0;
+    assert.equal(control, null, "degenerate grid must be rejected (null)");
+    assert.ok(ms < 50, `degenerate grid must reject fast (was ${ms.toFixed(0)}ms)`);
+  }
+});
 
 function noiseImage(w, h, seed = 1) {
   let s = seed >>> 0;
@@ -28,6 +51,19 @@ test("random noise decodes to nothing (no false positive, no throw)", () => {
     assert.doesNotThrow(() => { r = decode(noiseImage(640, 480, seed), { mesh: true, adaptive: true }); });
     assert.equal(r, null, `noise seed ${seed} must not decode`);
   }
+});
+
+// Guards the near-full-frame hang at the frame level: a noisy HD frame saturates
+// capstones+grids, and detection must not run unbounded per-grid searches (the
+// alignment spiral, jiggling every grid, or the locateApat window). Must stay well
+// bounded and, of course, never falsely decode.
+test("noisy HD frame stays bounded (no detect-phase blowup)", () => {
+  const t0 = performance.now();
+  let r;
+  assert.doesNotThrow(() => { r = decode(noiseImage(1280, 720, 1), { mesh: true, adaptive: true }); });
+  const ms = performance.now() - t0;
+  assert.equal(r, null);
+  assert.ok(ms < 1200, `noisy HD frame must stay bounded (was ${ms.toFixed(0)}ms)`);
 });
 
 test("blank image decodes to nothing", () => {

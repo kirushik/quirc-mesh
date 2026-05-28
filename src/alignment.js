@@ -39,7 +39,10 @@ function scoreApat(q, cx, cy, m) {
 // Search a window around (ex,ey) for the alignment pattern center; refine to the
 // dark-blob centroid. Returns {x,y} or null if no convincing pattern is found.
 function locateApat(q, ex, ey, m) {
-  const win = Math.max(2, Math.round(m * 2));
+  // Window is +-2 modules around the prediction. Clamp to a frame-relative bound so
+  // a pathological module size can never turn this into a multi-million-pixel scan
+  // (defense-in-depth; buildControlGrid already rejects degenerate grids).
+  const win = Math.max(2, Math.min(Math.round(m * 2), Math.round(Math.max(q.w, q.h) / 8)));
   let best = -1, bx = ex, by = ey;
   for (let dy = -win; dy <= win; dy++) {
     for (let dx = -win; dx <= win; dx++) {
@@ -71,14 +74,29 @@ export function buildControlGrid(q, qr) {
   const N = apat.length;
   if (N < 2) return null;
 
+  // Reject geometrically-degenerate grids before the expensive per-pattern search.
+  // Near-collinear clutter capstones yield an ill-conditioned perspective whose
+  // implied module size is huge; since locateApat's window scales with module size,
+  // that scan explodes into seconds-per-grid (the near-full-frame hang). A code
+  // detected in-frame cannot have modules far larger than the frame, nor sub-pixel
+  // modules. Returning null falls back to the cheap, bounded single-homography path.
+  // A code whose three finders were detected in-frame cannot span more than ~the
+  // frame diagonal; 1.5*max(w,h) sits just above it, so this never rejects a valid
+  // in-frame code but does reject the inflated bogus grids that clutter produces.
+  const mc = moduleSizePx(qr, qr.gridSize / 2, qr.gridSize / 2);
+  if (!(mc >= 0.5) || mc * qr.gridSize > 1.5 * Math.max(q.w, q.h)) return null;
+
   const nodeGX = apat.map((a) => a + 0.5);
   const nodeGY = apat.map((a) => a + 0.5);
   const grid = Array.from({ length: N }, () => new Array(N).fill(null));
 
   // Three finder corners from the finders' own perspectives (grid[row][col]).
-  const TL = q.capstones[qr.caps[1]].c; // top-left
-  const TR = q.capstones[qr.caps[2]].c; // top-right
-  const BL = q.capstones[qr.caps[0]].c; // bottom-left
+  // Use the grid's snapshot (finder.js) — the live capstones may have been
+  // re-rotated by a later grid sharing them.
+  const snap = qr.capSnap;
+  const TL = snap ? snap[1].c : q.capstones[qr.caps[1]].c; // top-left
+  const TR = snap ? snap[2].c : q.capstones[qr.caps[2]].c; // top-right
+  const BL = snap ? snap[0].c : q.capstones[qr.caps[0]].c; // bottom-left
   grid[0][0] = perspectiveMapF(TL, 6.5, 6.5);
   grid[0][N - 1] = perspectiveMapF(TR, 0.5, 6.5);
   grid[N - 1][0] = perspectiveMapF(BL, 6.5, 0.5);

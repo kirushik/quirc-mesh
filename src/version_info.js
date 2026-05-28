@@ -61,11 +61,14 @@ function readVersionBL(q, c, size) {
 // Build a coarse perspective for a candidate grid size from the four anchors
 // (3 finder corners + the located bottom-right alignment point).
 function perspectiveForSize(q, qr, gs) {
+  // Prefer the grid's finder snapshot (finder.js): shared capstones may have been
+  // re-rotated by a later grid since this one was recorded.
+  const c0 = (i) => qr.capSnap ? qr.capSnap[i].c0 : q.capstones[qr.caps[i]].corners[0];
   const rect = [
-    { x: q.capstones[qr.caps[1]].corners[0].x, y: q.capstones[qr.caps[1]].corners[0].y },
-    { x: q.capstones[qr.caps[2]].corners[0].x, y: q.capstones[qr.caps[2]].corners[0].y },
+    { x: c0(1).x, y: c0(1).y },
+    { x: c0(2).x, y: c0(2).y },
     { x: qr.align.x, y: qr.align.y },
-    { x: q.capstones[qr.caps[0]].corners[0].x, y: q.capstones[qr.caps[0]].corners[0].y },
+    { x: c0(0).x, y: c0(0).y },
   ];
   return perspectiveSetup(rect, gs - 7, gs - 7);
 }

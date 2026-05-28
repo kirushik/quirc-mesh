@@ -15,6 +15,22 @@ import { VERSION_DB } from "./version_db.js";
 const MAX_CAPSTONES = 32;
 const MAX_GRIDS = MAX_CAPSTONES * 2;
 
+// Capstone grouping tolerances. quirc uses 0.2 for both, which only groups
+// near-fronto-parallel codes: a large code seen with perspective tilt foreshortens
+// one finder leg and, worse, the grouping measures legs in the corner capstone's
+// 7-module local frame *extrapolated* across the whole code, inflating the
+// mismatch. Loosened values recover camera/close-up grouping (det 19->39 of 45 on
+// the synthetic corpus). Looser tolerances admit more bogus candidate grids, but
+// those are RS-gated (fail-closed) and ranked below the real grid by jiggle fitness
+// (see index.js), so they cost neither correctness nor, with the decode-attempt
+// cap, unbounded time.
+const AXIS_TOL = 0.4;     // how far off-axis a finder neighbour may sit (was 0.2)
+const SQUARE_TOL = 0.5;   // how unequal the two finder legs may be (was 0.2)
+
+// Optional detection diagnostics. Zero-cost unless q._diag is set (by tooling).
+function bump(q, key, n = 1) { if (q._diag) q._diag[key] = (q._diag[key] || 0) + n; }
+function rec(q, key, v) { if (q._diag) (q._diag[key] ||= []).push(v); }
+
 function lineIntersect(p0, p1, q0, q1) {
   const a = -(p1.y - p0.y);
   const b = p1.x - p0.x;
@@ -125,7 +141,12 @@ function findAlignmentPattern(q, index) {
   const dxMap = [1, 0, -1, 0];
   const dyMap = [0, -1, 0, 1];
 
-  while (stepSize * stepSize < sizeEstimate * 100) {
+  // Bound the spiral to a frame-relative radius. quirc's `stepSize^2 < sizeEstimate*100`
+  // searches ~10 modules out, which in PIXELS explodes for a bogus grid with a huge
+  // implied module size (sizeEstimate ~ module area). A real alignment pattern sits
+  // within a couple modules of the prediction, always well inside this cap.
+  const maxStep = Math.max(8, Math.round(Math.max(q.w, q.h) / 10));
+  while (stepSize * stepSize < sizeEstimate * 100 && stepSize <= maxStep) {
     for (let i = 0; i < stepSize; i++) {
       const code = regionCode(q, b.x, b.y);
       if (code >= 0) {
@@ -230,7 +251,7 @@ function fitnessAll(q, index) {
   return score;
 }
 
-function jigglePerspective(q, index) {
+export function jigglePerspective(q, index) {
   const qr = q.grids[index];
   let best = fitnessAll(q, index);
   const adjustments = new Float64Array(8);
@@ -248,6 +269,7 @@ function jigglePerspective(q, index) {
     }
     for (let i = 0; i < 8; i++) adjustments[i] *= 0.5;
   }
+  return best;
 }
 
 function setupQrPerspective(q, index) {
@@ -259,7 +281,11 @@ function setupQrPerspective(q, index) {
     { x: q.capstones[qr.caps[0]].corners[0].x, y: q.capstones[qr.caps[0]].corners[0].y },
   ];
   qr.c = perspectiveSetup(rect, qr.gridSize - 7, qr.gridSize - 7);
-  jigglePerspective(q, index);
+  // Cheap rank key only. The full jiggle is deferred to the grids decode actually
+  // attempts (index.js): a noisy/cluttered frame can record up to MAX_GRIDS grids,
+  // and jiggling all of them here cost seconds per frame. The unjiggled anchor
+  // perspective is good enough to rank candidates by fitness.
+  qr.fitness = fitnessAll(q, index);
 }
 
 function rotateCapstone(cap, h0, hd) {
@@ -299,7 +325,7 @@ function recordQrGrid(q, a, b, c) {
   }
 
   const qrIndex = q.grids.length;
-  const qr = { caps: [a, b, c], alignRegion: -1, align: { x: 0, y: 0 }, gridSize: 0, c: null };
+  const qr = { caps: [a, b, c], alignRegion: -1, align: { x: 0, y: 0 }, gridSize: 0, c: null, fitness: 0 };
   q.grids.push(qr);
 
   for (let i = 0; i < 3; i++) {
@@ -315,16 +341,25 @@ function recordQrGrid(q, a, b, c) {
   // them wastes huge time in jiggle/fitness over giant grid sizes (a source of
   // browser "page unresponsive" freezes) and they can never decode anyway.
   const gridVersion = (qr.gridSize - 17) / 4;
-  if (gridVersion < 1 || gridVersion > 40 || !Number.isInteger(gridVersion)) {
+  rec(q, "recorded_version", gridVersion);
+  // measure_grid_size is a coarse geometric estimate that drifts under perspective —
+  // a real v40 held close-up reads as v41. refineVersion (BCH) pins the true version
+  // later but only searches within +-3 of the recorded size, so clamp a slight
+  // over-estimate down to v40 instead of dropping the grid. Still reject wildly-off
+  // sizes (noise/clutter spawns v49..v153) to keep jiggle/fitness cost bounded.
+  if (gridVersion < 1 || gridVersion > 43 || !Number.isInteger(gridVersion)) {
+    bump(q, "reject_version");
     for (let i = 0; i < 3; i++) q.capstones[qr.caps[i]].qrGrid = -1;
     q.grids.pop();
     return;
   }
+  if (gridVersion > 40) qr.gridSize = 4 * 40 + 17;
 
   const inter = lineIntersect(
     q.capstones[a].corners[0], q.capstones[a].corners[1],
     q.capstones[c].corners[0], q.capstones[c].corners[3]);
   if (!inter) {
+    bump(q, "reject_no_inter");
     for (let i = 0; i < 3; i++) q.capstones[qr.caps[i]].qrGrid = -1;
     q.grids.pop();
     return;
@@ -352,15 +387,43 @@ function recordQrGrid(q, a, b, c) {
   }
 
   setupQrPerspective(q, qrIndex);
+
+  // Snapshot the finder state this grid depends on. Capstones are SHARED across
+  // grids, and recordQrGrid rotates them (rotateCapstone) per grid; a later grid
+  // re-rotating a shared capstone would otherwise corrupt this grid's post-detect
+  // sampling (mesh control corners) and version refinement, which read finder
+  // geometry. rotateCapstone reassigns .c/.corners (never mutates in place), so the
+  // captured .c reference and copied corner stay valid for this grid.
+  qr.capSnap = qr.caps.map((ci) => {
+    const cap = q.capstones[ci];
+    return { c: cap.c, c0: { x: cap.corners[0].x, y: cap.corners[0].y } };
+  });
+  bump(q, "recorded");
 }
 
 function testNeighbours(q, i, hlist, vlist) {
+  const squareTol = q._squareTol ?? SQUARE_TOL;
+  const cc = q.capstones[i].center;
   for (let j = 0; j < hlist.length; j++) {
     const hn = hlist[j];
+    const hc = q.capstones[hn.index].center;
+    const hPx = Math.hypot(hc.x - cc.x, hc.y - cc.y);
     for (let k = 0; k < vlist.length; k++) {
       const vn = vlist[k];
-      const squareness = Math.abs(1.0 - hn.distance / vn.distance);
-      if (squareness < 0.2) recordQrGrid(q, hn.index, i, vn.index);
+      const vc = q.capstones[vn.index].center;
+      const vPx = Math.hypot(vc.x - cc.x, vc.y - cc.y);
+      // Two squareness measures of the QR's two equal sides. The local-frame one
+      // (quirc's) is accurate for small codes but, for a large code, extrapolates
+      // the corner's 7-module homography across the whole symbol and invents a leg
+      // imbalance. The pixel-distance one (between finder centers) is
+      // extrapolation-free and survives large/close-up codes. Accept on either.
+      const sqLocal = Math.abs(1.0 - hn.distance / vn.distance);
+      const sqPx = Math.abs(1.0 - hPx / vPx);
+      rec(q, "squareness", Math.min(sqLocal, sqPx));
+      if (sqLocal < squareTol || sqPx < squareTol) {
+        bump(q, "square_pass");
+        recordQrGrid(q, hn.index, i, vn.index);
+      } else bump(q, "square_fail");
     }
   }
 }
@@ -369,6 +432,7 @@ function testGrouping(q, i) {
   const c1 = q.capstones[i];
   const hlist = [];
   const vlist = [];
+  const axisTol = q._axisTol ?? AXIS_TOL;
 
   for (let j = 0; j < q.capstones.length; j++) {
     if (i === j) continue;
@@ -376,11 +440,14 @@ function testGrouping(q, i) {
     const { u, v } = perspectiveUnmap(c1.c, c2.center);
     const uu = Math.abs(u - 3.5);
     const vv = Math.abs(v - 3.5);
+    rec(q, "pair_uv", { i, j, uu, vv });
 
-    if (uu < 0.2 * vv) hlist.push({ index: j, distance: vv });
-    if (vv < 0.2 * uu) vlist.push({ index: j, distance: uu });
+    if (uu < axisTol * vv) hlist.push({ index: j, distance: vv });
+    if (vv < axisTol * uu) vlist.push({ index: j, distance: uu });
   }
 
+  bump(q, "grouping_calls");
+  if (hlist.length && vlist.length) bump(q, "grouping_both"); else bump(q, "grouping_nopair");
   if (!(hlist.length && vlist.length)) return;
   testNeighbours(q, i, hlist, vlist);
 }

@@ -8,7 +8,7 @@
 // a confidently-wrong payload (PRD AC-4). RS + format BCH guarantee this.
 
 import { toGray, otsu, binarizeGlobal, binarizeAdaptive } from "./binarize.js";
-import { detect } from "./finder.js";
+import { detect, jigglePerspective } from "./finder.js";
 import { extractCode, extractCodeMesh } from "./sample.js";
 import { buildControlGrid } from "./alignment.js";
 import { buildMesh } from "./mesh.js";
@@ -18,6 +18,17 @@ import { ECC_LETTER } from "./version_db.js";
 import { ERR } from "./errors.js";
 
 const utf8 = new TextDecoder("utf-8", { fatal: false });
+
+// Loosened grouping (finder.js) admits more candidate grids per frame. Each grid
+// costs an expensive mesh sample, so we try them best-first by the jiggle fitness
+// the detector already computed (the real code dominates bogus clutter grids) and
+// cap the number of full decode attempts — bounding worst-case time on noisy
+// close-up frames without sacrificing the real read (it is almost always rank 1).
+const MAX_DECODE_ATTEMPTS = 10;
+
+function gridsByFitness(q) {
+  return q.grids.map((_, i) => i).sort((a, b) => (q.grids[b].fitness || 0) - (q.grids[a].fitness || 0));
+}
 
 function flipCode(code) {
   const size = code.size;
@@ -57,6 +68,8 @@ function buildState(image, adaptive) {
 // global homography for v<2 or when no control grid can be built).
 function extractGrid(q, index, useMesh) {
   const qr = q.grids[index];
+  // Jiggle is deferred here from detect() so only attempted grids pay for it.
+  jigglePerspective(q, index);
   // Pin the true version from the version-info blocks (v>=7); corrects gridSize +
   // perspective when measure_grid_size drifted under distortion.
   refineVersion(q, qr);
@@ -82,8 +95,9 @@ export function decode(image, opts = {}) {
   const q = buildState(image, opts.adaptive === true);
   detect(q);
 
-  for (let i = 0; i < q.grids.length; i++) {
-    const code = extractGrid(q, i, useMesh);
+  const order = gridsByFitness(q);
+  for (let n = 0; n < order.length && n < MAX_DECODE_ATTEMPTS; n++) {
+    const code = extractGrid(q, order[n], useMesh);
     const data = tryDecode(code);
     if (data) return buildResult(data, code.corners);
   }
@@ -97,8 +111,9 @@ export function decodeAll(image, opts = {}) {
   detect(q);
 
   const results = [];
-  for (let i = 0; i < q.grids.length; i++) {
-    const code = extractGrid(q, i, useMesh);
+  const order = gridsByFitness(q);
+  for (let n = 0; n < order.length && n < MAX_DECODE_ATTEMPTS; n++) {
+    const code = extractGrid(q, order[n], useMesh);
     const data = tryDecode(code);
     if (data) results.push(buildResult(data, code.corners));
   }
@@ -113,8 +128,9 @@ export function decodeDebug(image, opts = {}) {
   detect(q);
 
   let result = null;
-  for (let i = 0; i < q.grids.length; i++) {
-    const code = extractGrid(q, i, useMesh);
+  const order = gridsByFitness(q);
+  for (let n = 0; n < order.length && n < MAX_DECODE_ATTEMPTS; n++) {
+    const code = extractGrid(q, order[n], useMesh);
     const data = tryDecode(code);
     if (data) { result = buildResult(data, code.corners); break; }
   }

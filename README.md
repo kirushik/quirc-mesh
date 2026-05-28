@@ -22,10 +22,10 @@ quirc-mesh forks quirc — Daniel Beer's wonderfully compact C decoder — and s
 
 ## Quick start
 
-It's pure ESM, has no runtime dependencies, and runs in browsers and Node ≥ 18. It's not on npm yet, so install it straight from GitHub:
+It's pure ESM, has no runtime dependencies, and runs in browsers and Node ≥ 18.
 
 ```bash
-npm install github:kirushik/quirc-mesh
+npm install quirc-mesh
 ```
 
 ```js
@@ -81,7 +81,7 @@ A few numbers for calibration:
 - A v40 frame decodes in **~49 ms (p90)** in pure JS — fast enough that WebAssembly bought nothing, so there is none.
 - **~1.9k lines** of decoder. Zero runtime dependencies.
 
-It's early (`0.1.0`). The decoder core is solid; the part still rough is the detection front-end, which can be fooled by extreme tilt or a code shoved right up against the lens. That's what I'm hardening next.
+It's early (`0.2.0`). `0.2` reworked the detection front-end for large/close-up codes: grouping no longer relies on extrapolating a finder's local frame across the whole symbol, so a near-full-frame v40 now decodes (it previously found the finders but couldn't group them), and a few unbounded geometric searches that could make a cluttered frame hang for seconds are now bounded. The remaining rough edge is *sampling* under heavy lens distortion — detection finds the code, but the mesh can't always recover every module yet.
 
 ## How it actually works
 

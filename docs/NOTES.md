@@ -283,3 +283,83 @@ The property for a backup tool: **null or the exact correct payload, never a wro
   `decode(imageData, { mesh:true, adaptive:true })` on the v2 recovery path; it returns the
   base45 alphanumeric payload string (== the QR-layer text) or null. Coordinate with
   `banana_split/V2_DESIGN.md` §8.3.
+
+---
+
+## M7 — Detection robustness for large / close-up codes (done)
+
+Triggered by two real camera symptoms: near-full-frame codes (a) often produced
+`grids:[none]` (no decode at all), and (b) intermittently **hung Firefox ~30s**. Method:
+reproduce headlessly (no shared code with `src/`) and instrument, never guess. Added
+`harness/repro-fullframe.mjs` (renders the v40 vector almost filling a 1080p frame) and a
+zero-cost detection-diagnostics hook (`q._diag`, populated by `finder.js`) feeding
+`harness/diag-detect.mjs` (per-stage failure attribution) and `harness/sweep-detect.mjs`
+(tolerance sweep vs detection rate).
+
+**Finding 1 — grouping, not capstone detection, was the detection ceiling.** On the distorted
+corpus, large codes reliably found their 3 finders but died at the *squareness* test.
+`quirc` groups capstones by classifying neighbours and comparing the two finder "legs" in the
+**corner capstone's 7-module local frame, extrapolated across the whole symbol**. For a v40 the
+finders are ~165 modules apart, so that extrapolation invents a huge leg imbalance (measured
+471 vs 194 "modules" for legs that are nearly equal). Two changes:
+- **Loosened the tolerances** `AXIS_TOL 0.2->0.4`, `SQUARE_TOL 0.2->0.5` (quirc's 0.2 only groups
+  near-fronto-parallel small codes). Swept empirically (`sweep-detect.mjs`): detection rises
+  monotonically with both; chose the knee. Overridable via `q._axisTol`/`q._squareTol`.
+- **Added an extrapolation-free squareness:** also compare the two legs by **pixel distance
+  between finder centres**; accept the pairing if *either* the local-frame or the pixel-distance
+  squareness passes. The pixel metric is immune to the extrapolation artefact and is what
+  recovers full-frame (pixel squareness ~0.06 where the local-frame one was 0.59).
+- Result: synthetic **detection 19/45 -> 45/45**; full-frame v40 decodes at ~0.90-0.92 frame-fill
+  (~100ms) where it previously formed 0 grids.
+
+**Finding 2 — a latent correctness bug, exposed by admitting >1 candidate grid per frame.**
+Capstones are **shared** across candidate grids, and `recordQrGrid` rotates them
+(`rotateCapstone`) per grid. A later grid re-rotating a shared capstone silently corrupted an
+*earlier* grid's post-detect consumers that read live finder geometry: the mesh control corners
+(`alignment.js buildControlGrid`) and version refinement (`version_info.js perspectiveForSize`).
+Symptom: a clean v37 that decoded with one grid failed (`err 0->4 DATA_ECC`) once sibling grids
+existed — *identical* grid object, different result. **Fix:** snapshot each grid's finder state
+(`qr.capSnap`: the 3 rotated perspectives `.c` + outer corners) at record time; post-detect
+consumers read the snapshot. `rotateCapstone` reassigns (never mutates in place), so captured
+references stay valid. This was a pre-existing hazard masked by tight tolerances.
+
+**Finding 3 — the hang was unbounded geometric searches, not a cost to time-box.** Looser
+grouping (Finding 1) lets a noisy/cluttered frame saturate capstones (32) and grids (64). Three
+per-grid searches each scale with the grid's *implied module size* — and a near-collinear clutter
+triple yields an ill-conditioned perspective with a huge implied module size, so each explodes,
+x64 grids. Profiled headlessly (`harness/repro-fullframe.mjs`, `harness/probe-degenerate.mjs`,
+and a noise-frame timer): a 1280x720 pure-noise frame took **3.3s**, of which `detect()` alone was
+**2.0s**. The three sources, all now bounded (geometry, not timeouts):
+- **`locateApat` window** (decode phase): `+-2 modules` but in **pixels** (`win = round(m*2)`, loop
+  `(2win+1)^2`). Proven: one v10 grid's `buildControlGrid` 8ms @6px/module -> 775ms @300px/module
+  (~7x for v40). Fix: `buildControlGrid` rejects grids whose central module size implies a code
+  **>1.5x max(w,h)** (above the frame diagonal -> never rejects a valid in-frame code) or sub-pixel
+  /non-finite, *before* the search; window also clamped to `frame/8`. Locked by the
+  "degenerate grid ... rejected fast" test (<50ms).
+- **`findAlignmentPattern` spiral** (detect phase, the dominant cost): quirc searches ~10 modules
+  out (`stepSize^2 < sizeEstimate*100`), which in pixels explodes for a huge implied module size.
+  Fix: cap the spiral radius to `max(w,h)/10`. This alone cut `detect()` 2003ms -> 210ms.
+- **jiggle-all-grids** (detect phase): `setupQrPerspective` jiggled *every* recorded grid. Fix:
+  store a cheap one-shot `fitnessAll` as the rank key and **defer the full jiggle to the grids
+  decode actually attempts** (`jigglePerspective` is now called from `index.js extractGrid`).
+- Plus `recordQrGrid` version-reject widened **40 -> 43 with clamp-to-40**: a real v40 held
+  close-up reads as v41 under `measure_grid_size` drift; `refineVersion` (BCH, +-3 search) pins it.
+  Still rejects v44+ (noise spawns v49..v153).
+- Net: worst-case 1280x720 noise frame **3.3s -> ~0.4s** (`detect` 2.0s -> 0.21s). Locked by the
+  "noisy HD frame stays bounded" test (<1200ms).
+
+**Bounded decode (the alternative to per-frame timeouts).** Looser grouping admits more candidate
+grids, so `decode`/`decodeAll`/`decodeDebug` try them **best-first by fitness** (`qr.fitness`) with
+a **10-attempt cap**, and the expensive per-grid work (jiggle + alignment) happens only for those
+attempts. The real code is almost always rank 1, so it decodes immediately and clutter cannot run
+up the clock — a priority+cap, not a wall-clock guard.
+
+**Invariants preserved:** clean **10/10**, suite **23/23** (added the degenerate-grid and
+noisy-HD-frame guards), fail-closed fuzz **900 trials / 0 wrong reads** (RS gate untouched; the
+clamps only change which *plausible* sizes reach the RS-gated path). Per-frame time bounded on
+clutter/noise (the quadratic searches are gone).
+
+**Remaining frontier (NOT detection):** of 45/45 detected synthetic frames only ~14 *decode* —
+the gap is **sampling** quality under heavy radial distortion (mesh anchor precision / a possible
+per-tile-homography "Option B"), a separate axis from detection. The very largest fill (~0.95) is
+seed-dependent. Both are sampling/edge work, not the grouping/hang issues addressed here.
