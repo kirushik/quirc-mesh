@@ -22,22 +22,39 @@ Target progression:
 - M1: low/mid rungs pass (single-homography baseline).
 - M2: **all 10 pass**, including v37/v40 (mesh sampling), on clean images.
 
-## Camera — `camera.html` (Milestone 3, to build)
+## Synthetic distortion — `gen-distorted.mjs` + `run-synth.mjs` (no camera needed)
 
-A browser page: `getUserMedia` → `<canvas>` → `decode()` per frame, with on-screen
-success feedback and diagnostics (px/module, decode ms, payload-match vs
-`expected/`). **Model it on
-`banana_split/_scratch/bananasplit-wasm-acidtest.html`** so results are directly
-comparable to the zxing-cpp baseline (same layout, same counters).
+```
+npm run synth:gen     # writes test-vectors/distorted/*.png (gitignored)
+npm run synth         # decodes them: single vs mesh vs mesh+adaptive, + detection rate
+```
+
+`gen-distorted.mjs` synthesizes camera-like degraded vectors (perspective + **radial
+lens distortion** + blur + noise + lighting gradient) from the clean PNGs. Radial
+distortion is the key: a single homography models any flat perspective exactly, so
+only a *non-projective* warp (lens/curl) exercises the mesh. It shares no code with
+`src/` so a passing mesh is a real result. `run-synth.mjs` reports, per
+version/level, the detection rate (`det`) and decode success for each sampler.
+
+`test/mesh.test.js` is the locked-in proof: under radial distortion the mesh
+decodes v25/v34/v40 byte-exact where the single homography fails.
+
+## Camera — `camera.html` + `serve.mjs` (the physical acid test)
+
+```
+npm run serve         # http://localhost:8000  (localhost = secure context for getUserMedia)
+# open  http://localhost:8000/harness/camera.html
+```
+
+`getUserMedia` → `<canvas>` → `decode()` per frame, with a success banner and
+diagnostics (frame size, decode ms, px/module, decoded version/EC, and **byte-exact
+payload-match** against a selected corpus vector). Toggles for mesh and adaptive
+binarization. Pick `qr_worst…` (v40) in the *expected* dropdown.
 
 The acid test: point the reference webcam (Framework 13 1080p) at the **printed**
-`qr_worst_2of3_fullkey_ECL` (v40) and `qr_mid` (v37). Success = exact payload match
-in both Chrome and Firefox. The committed PNGs are byte-identical to the sheets
-already printed and verified with zxing-cpp, so reuse those printouts.
-
-Nice-to-have: a single self-contained file (base64-inline the decoder + sample
-thumbnails) so it opens from `file://` with no server — that's how the banana_split
-PoCs were delivered. For day-to-day dev a tiny static server is fine.
+`qr_worst_2of3_fullkey_ECL` (v40) and `qr_mid` (v37). Success = "MATCH ✓" in both
+Chrome and Firefox. The committed PNGs are byte-identical to the sheets already
+printed and verified with zxing-cpp, so reuse those printouts.
 
 ### Known browser gotchas
 - **Firefox `resistFingerprinting`** farbles `canvas.getImageData` (corrupts

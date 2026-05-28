@@ -7,7 +7,7 @@
 // Returns null on any failure (no decode, RS failure, etc.) — fail-closed: never
 // a confidently-wrong payload (PRD AC-4). RS + format BCH guarantee this.
 
-import { toGray, otsu, binarizeGlobal } from "./binarize.js";
+import { toGray, otsu, binarizeGlobal, binarizeAdaptive } from "./binarize.js";
 import { detect } from "./finder.js";
 import { extractCode, extractCodeMesh } from "./sample.js";
 import { buildControlGrid } from "./alignment.js";
@@ -44,13 +44,13 @@ function buildResult(data, corners) {
   };
 }
 
-// Build the binarized detector state for an image (global Otsu — M1 path).
-function buildState(image) {
+// Build the binarized detector state for an image. `adaptive` selects the local
+// block-based binarizer (camera path); default is global Otsu (exact on clean PNGs).
+function buildState(image, adaptive) {
   const gray = toGray(image);
   const w = image.width, h = image.height;
-  const threshold = otsu(gray);
-  const pixels = binarizeGlobal(gray, threshold);
-  return { w, h, pixels, regions: [null, null], capstones: [], grids: [], threshold };
+  const pixels = adaptive ? binarizeAdaptive(gray, w, h) : binarizeGlobal(gray, otsu(gray));
+  return { w, h, pixels, regions: [null, null], capstones: [], grids: [] };
 }
 
 // Extract a grid's matrix, preferring the mesh sampler (falls back to the single
@@ -79,7 +79,7 @@ function tryDecode(code) {
 // opts.mesh (default true): use piecewise mesh sampling; false = single homography.
 export function decode(image, opts = {}) {
   const useMesh = opts.mesh !== false;
-  const q = buildState(image);
+  const q = buildState(image, opts.adaptive === true);
   detect(q);
 
   for (let i = 0; i < q.grids.length; i++) {
@@ -93,7 +93,7 @@ export function decode(image, opts = {}) {
 // Decode all readable codes in the image (returns an array, possibly empty).
 export function decodeAll(image, opts = {}) {
   const useMesh = opts.mesh !== false;
-  const q = buildState(image);
+  const q = buildState(image, opts.adaptive === true);
   detect(q);
 
   const results = [];

@@ -153,3 +153,36 @@ New test `mesh.test.js` proves the IP; `npm test` is 16/16; clean harness stays 
   detection yields 0 grids, nothing downstream can help. Making the finder/grouping robust
   (and adaptive binarization for camera lighting) is the M3 critical path, validated
   ultimately by the physical camera test.
+
+---
+
+## M3 — Camera robustness + synthetic proof (in progress)
+
+Built so far: local adaptive binarizer, the camera harness, and a 3-way synthetic
+comparison. The detection-robustness engineering and the physical acid test remain.
+
+- **Local adaptive binarizer** (`binarize.binarizeAdaptive`, after ZXing's
+  HybridBinarizer: 8x8 blocks, per-block black point from a 5x5 neighbourhood of block
+  averages, low-contrast blocks defer to neighbours). Opt-in via `decode(img,{adaptive:true})`;
+  global Otsu stays the default so clean stays byte-exact (10/10). On the current synthetic
+  set it did **not** beat global Otsu (those images have near-uniform lighting; the gradient
+  is mild). It's expected to matter for *real* camera shadows/gradients — keep it, validate on
+  the physical test.
+- **Camera harness** `harness/camera.html` + `harness/serve.mjs` (`npm run serve` ->
+  http://localhost:8000/harness/camera.html). getUserMedia -> canvas -> `decode()` per frame;
+  success banner, diagnostics (frame size, decode ms, px/module from corners, version/EC), and
+  **byte-exact match** against a corpus vector chosen from a dropdown. Toggles for mesh +
+  adaptive. Includes a resistFingerprinting canvas-readback hint. Smoke-tested: server serves
+  ES modules with correct MIME; getUserMedia itself needs a real browser (user runs it).
+- **Synthetic finding: detection is the dominant limiter.** `npm run synth` over 45 degraded
+  vectors: detection finds a grid in only ~20/45; among those, mesh decodes more than single
+  (mesh 6 vs single 3 overall). So quirc's finder/grouping fragility — not sampling — is now
+  the bottleneck, and it's non-monotonic in distortion strength. NOTE the current generator
+  levels (esp. moderate/strong: heavy combined blur+noise+radial+perspective) are likely
+  HARSHER than a flat printed sheet held to a webcam (the real acid test, which zxing-cpp
+  passes), so the synthetic detection rate is a pessimistic proxy.
+- **Open M3 work:** (1) finder/grouping robustness under distortion (the real critical path —
+  candidate directions: more tolerant grouping geometry, multi-threshold detection passes,
+  zxing-style finder grouping); (2) the **physical camera acid test** (user-run, Framework 13,
+  Chrome+Firefox, printed v40/v37) — the ground-truth validator that also tells us whether the
+  synthetic is representative.

@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>quirc-mesh — camera acid test</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; font: 14px/1.5 system-ui, sans-serif; background: #111; color: #eee; }
+  header { padding: 10px 16px; background: #1b1b1b; border-bottom: 1px solid #333; }
+  header h1 { font-size: 16px; margin: 0; }
+  header small { color: #999; }
+  main { display: flex; flex-wrap: wrap; gap: 16px; padding: 16px; }
+  .stage { position: relative; }
+  canvas { max-width: 100%; border: 1px solid #333; background: #000; }
+  video { display: none; }
+  .panel { min-width: 320px; flex: 1; }
+  .row { display: flex; gap: 12px; align-items: center; margin: 6px 0; flex-wrap: wrap; }
+  label { color: #bbb; }
+  select, button { background: #222; color: #eee; border: 1px solid #444; border-radius: 6px; padding: 6px 10px; }
+  button { cursor: pointer; }
+  .stat { display: grid; grid-template-columns: 140px 1fr; gap: 4px 10px; margin-top: 10px; }
+  .stat div:nth-child(odd) { color: #999; }
+  .banner { font-size: 18px; font-weight: 600; padding: 10px 14px; border-radius: 8px; margin-top: 10px; }
+  .ok { background: #0c3; color: #021; }
+  .fail { background: #511; color: #fbb; }
+  .warn { background: #5a4500; color: #ffd; }
+  pre { white-space: pre-wrap; word-break: break-all; background: #000; border: 1px solid #333; padding: 10px; border-radius: 6px; max-height: 180px; overflow: auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1>quirc-mesh — camera acid test</h1>
+  <small>Point the webcam at a printed code. Success = exact payload match. Test in Chrome <em>and</em> Firefox.</small>
+</header>
+<main>
+  <div class="stage">
+    <canvas id="view"></canvas>
+    <video id="cam" playsinline></video>
+  </div>
+  <div class="panel">
+    <div class="row">
+      <label>camera</label><select id="device"></select>
+    </div>
+    <div class="row">
+      <label>expected</label><select id="expected"></select>
+    </div>
+    <div class="row">
+      <label><input type="checkbox" id="mesh" checked> mesh</label>
+      <label><input type="checkbox" id="adaptive" checked> adaptive binarize</label>
+      <button id="toggle">Pause</button>
+    </div>
+    <div id="banner" class="banner warn">starting…</div>
+    <div class="stat">
+      <div>frame</div><div id="s-frame">—</div>
+      <div>decode time</div><div id="s-ms">—</div>
+      <div>version / EC</div><div id="s-ver">—</div>
+      <div>px / module</div><div id="s-ppm">—</div>
+      <div>payload match</div><div id="s-match">—</div>
+      <div>best so far</div><div id="s-best">—</div>
+    </div>
+    <pre id="text">(decoded payload appears here)</pre>
+    <small id="rfp" style="color:#fa6"></small>
+  </div>
+</main>
+
+<script type="module">
+import { decode } from "../src/index.js";
+
+const view = document.getElementById("view");
+const ctx = view.getContext("2d", { willReadFrequently: true });
+const cam = document.getElementById("cam");
+const els = {
+  device: document.getElementById("device"),
+  expected: document.getElementById("expected"),
+  mesh: document.getElementById("mesh"),
+  adaptive: document.getElementById("adaptive"),
+  toggle: document.getElementById("toggle"),
+  banner: document.getElementById("banner"),
+  frame: document.getElementById("s-frame"),
+  ms: document.getElementById("s-ms"),
+  ver: document.getElementById("s-ver"),
+  ppm: document.getElementById("s-ppm"),
+  match: document.getElementById("s-match"),
+  best: document.getElementById("s-best"),
+  text: document.getElementById("text"),
+  rfp: document.getElementById("rfp"),
+};
+
+let expectedMap = {};   // name -> payload text
+let running = true;
+let bestMs = Infinity;
+
+// Load the corpus list so the user can verify byte-exact match against a vector.
+try {
+  const manifest = await (await fetch("../test-vectors/manifest.json")).json();
+  for (const v of manifest.vectors) {
+    const name = v.file.split("/").pop().replace(/\.png$/, "");
+    const txt = await (await fetch("../test-vectors/" + v.expectedFile)).text();
+    expectedMap[name] = txt;
+    const opt = document.createElement("option");
+    opt.value = name;
+    opt.textContent = `${name} (v${v.version} ${v.ecLevel})`;
+    if (name.includes("worst")) opt.selected = true;
+    els.expected.appendChild(opt);
+  }
+} catch (e) {
+  const opt = document.createElement("option");
+  opt.textContent = "(no manifest — serve from project root)";
+  els.expected.appendChild(opt);
+}
+
+async function listDevices() {
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  els.device.innerHTML = "";
+  for (const d of devices.filter((d) => d.kind === "videoinput")) {
+    const opt = document.createElement("option");
+    opt.value = d.deviceId;
+    opt.textContent = d.label || `camera ${els.device.length + 1}`;
+    els.device.appendChild(opt);
+  }
+}
+
+let stream = null;
+async function start(deviceId) {
+  if (stream) for (const t of stream.getTracks()) t.stop();
+  stream = await navigator.mediaDevices.getUserMedia({
+    video: deviceId
+      ? { deviceId: { exact: deviceId }, width: { ideal: 1920 }, height: { ideal: 1080 } }
+      : { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } },
+  });
+  cam.srcObject = stream;
+  await cam.play();
+  view.width = cam.videoWidth;
+  view.height = cam.videoHeight;
+  await listDevices();
+}
+
+function ppm(corners, version) {
+  if (!corners) return null;
+  const modules = version * 4 + 17;
+  const d = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  const side = (d(corners[0], corners[1]) + d(corners[1], corners[2]) +
+                d(corners[2], corners[3]) + d(corners[3], corners[0])) / 4;
+  return side / modules;
+}
+
+function drawOverlay(corners) {
+  if (!corners) return;
+  ctx.strokeStyle = "#0f0";
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(corners[0].x, corners[0].y);
+  for (let i = 1; i < 4; i++) ctx.lineTo(corners[i].x, corners[i].y);
+  ctx.closePath();
+  ctx.stroke();
+}
+
+function tick() {
+  if (running && cam.readyState === cam.HAVE_ENOUGH_DATA) {
+    if (view.width !== cam.videoWidth) { view.width = cam.videoWidth; view.height = cam.videoHeight; }
+    ctx.drawImage(cam, 0, 0, view.width, view.height);
+    const img = ctx.getImageData(0, 0, view.width, view.height);
+
+    const t0 = performance.now();
+    let r = null;
+    try { r = decode(img, { mesh: els.mesh.checked, adaptive: els.adaptive.checked }); } catch (e) {}
+    const ms = performance.now() - t0;
+
+    els.frame.textContent = `${view.width}×${view.height}`;
+    els.ms.textContent = `${ms.toFixed(0)} ms`;
+
+    if (r) {
+      drawOverlay(r.corners);
+      const p = ppm(r.corners, r.version);
+      els.ver.textContent = `v${r.version} / ${r.ecLevel}`;
+      els.ppm.textContent = p ? p.toFixed(2) : "—";
+      els.text.textContent = r.text;
+      const want = expectedMap[els.expected.value];
+      const exact = want != null && r.text === want;
+      els.match.textContent = want == null ? "(no expected loaded)" : exact ? "EXACT ✓" : "decoded, but ≠ expected";
+      if (ms < bestMs) { bestMs = ms; els.best.textContent = `${ms.toFixed(0)} ms`; }
+      if (exact) { els.banner.className = "banner ok"; els.banner.textContent = "MATCH ✓ — printed code read correctly"; }
+      else { els.banner.className = "banner warn"; els.banner.textContent = "decoded a code (check it matches the selected vector)"; }
+    } else {
+      els.ver.textContent = "—"; els.ppm.textContent = "—"; els.match.textContent = "—";
+      els.banner.className = "banner fail";
+      els.banner.textContent = "no decode — hold steady, fill the frame, ensure focus";
+    }
+  }
+  requestAnimationFrame(tick);
+}
+
+els.device.addEventListener("change", () => start(els.device.value));
+els.toggle.addEventListener("click", () => {
+  running = !running;
+  els.toggle.textContent = running ? "Pause" : "Resume";
+});
+
+// Firefox resistFingerprinting hint: detect a constant-canvas readback anomaly.
+function rfpHint() {
+  ctx.fillStyle = "#789"; ctx.fillRect(0, 0, 4, 4);
+  const d = ctx.getImageData(0, 0, 4, 4).data;
+  if (!(d[0] === 0x77 && d[1] === 0x88 && d[2] === 0x99)) {
+    els.rfp.textContent = "⚠ canvas readback looks altered — Firefox privacy.resistFingerprinting may be farbling getImageData; disable it for testing.";
+  }
+}
+
+try {
+  await start();
+  rfpHint();
+  requestAnimationFrame(tick);
+} catch (e) {
+  els.banner.className = "banner fail";
+  els.banner.textContent = "camera error: " + (e.message || e);
+}
+</script>
+</body>
+</html>
