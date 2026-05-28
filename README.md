@@ -1,102 +1,104 @@
 # quirc-mesh
 
-A small, auditable QR-code **decoder** that can read **high-version (v20–v40) codes from a webcam** — the case where `jsQR`, `zxing-js`, ZBar, and stock `quirc` all fail silently.
+**A tiny, readable QR decoder that reads big QR codes from a webcam — the ones every other pure-JS library quietly gives up on.**
 
-It is a fork of [dlbeer/quirc](https://github.com/dlbeer/quirc) (ISC, ~3 kLOC) that replaces quirc's single global perspective transform with **piecewise grid sampling over the full mesh of alignment patterns** — the technique that makes `zxing-cpp` succeed where the small libraries fail.
+Point a webcam at a small QR code and almost any JavaScript library will read it. Point it at a *big* one — a dense v40 code, 177×177 modules, the kind that holds a few kilobytes — and watch what happens: nothing. No error. No payload. Just silence, frame after frame.
 
-Target consumer: **[Banana Split](https://github.com/paritytech/banana_split)** v2, a Shamir-secret-sharing paper-backup tool that needs to scan dense QR shards (up to a full 4096-bit GPG key) during recovery, while keeping its bundle tiny and fully auditable (no opaque WASM blob). See `docs/PRIOR_ART.md` for the full backstory.
+I hit this building a paper-backup tool. The codes themselves were fine; clean PNGs decoded instantly. But held in front of a laptop camera, every pure-JS decoder I tried — [jsQR](https://github.com/cozmo/jsQR), [zxing-js](https://github.com/zxing-js/library), the original [quirc](https://github.com/dlbeer/quirc) — failed silently. The only thing that worked was [zxing-cpp](https://github.com/zxing-cpp/zxing-cpp): excellent, battle-tested, and a ~1 MB opaque WebAssembly blob. For a tool whose whole pitch is "you can audit every line that touches your secret key," shipping a megabyte of compiled C++ felt like cheating.
 
-## Why this exists (one paragraph)
+quirc-mesh is the attempt to get that same capability — big codes, real camera, byte-exact — in a few thousand lines of plain JavaScript you can actually read.
 
-Banana Split's v2 format can pack large secrets into single QR codes per shard, but those codes reach v37–v40 (165×165–177×177 modules). Every pure-JS decoder we tried reads such codes fine from a *clean PNG* but **fails from a camera**, because they map the whole code with one homography anchored on 3 finder patterns + at most one alignment pattern. A v40 code carries ~46 alignment patterns precisely because one homography cannot survive lens/paper distortion across that span. `zxing-cpp` (C++→WASM) is the only engine we found that reads our worst v40 from the laptop webcam — but it's a ~1 MB opaque blob. quirc-mesh aims to deliver the same capability in a tiny, auditable codebase, **ideally in pure JS so no WASM is needed at all**.
+## Why the others fail (and what changed)
 
-## Usage
+Here's the part I didn't understand until I went digging.
+
+A QR decoder has to map each module — the little black-and-white squares — from the camera image back onto a clean grid. The small libraries do this with **one** perspective transform, anchored on the three big finder squares in the corners. For a flat code under a flat lens, one transform is exact.
+
+But a sheet of paper in front of a webcam is *not* flat to the lens. There's a little curl in the paper, a little barrel distortion from a cheap wide lens, a little tilt. Across a small code that error is invisible. Across 177 modules it piles up past half a module — and once your grid is half a module off, every bit downstream is wrong, Reed–Solomon gives up, and you get... silence.
+
+The QR spec actually plans for this. A v40 code carries ~46 *alignment patterns* sprinkled across its face for exactly one reason: so a decoder can stop pretending the code is flat and sample it **piecewise**. zxing-cpp does this. The small JS libraries don't.
+
+quirc-mesh forks quirc — Daniel Beer's wonderfully compact C decoder — and swaps its single global transform for a **mesh**: it finds every alignment pattern it can, builds a grid of small local transforms between them, and samples each module through its *nearest* patch instead of through one transform for the whole code. That's the entire idea. The rest is careful porting.
+
+## Quick start
+
+It's pure ESM, has no runtime dependencies, and runs in browsers and Node ≥ 18. It's not on npm yet, so install it straight from GitHub:
+
+```bash
+npm install github:kirushik/quirc-mesh
+```
 
 ```js
 import { decode } from "quirc-mesh";
 
-// imageData: { data: Uint8ClampedArray (RGBA), width, height }
-// e.g. canvas.getContext("2d").getImageData(...) in a browser, or pngjs in Node.
-const result = decode(imageData);
+// imageData is { data: Uint8ClampedArray, width, height } —
+// straight from canvas.getContext("2d").getImageData(...) in a browser,
+// or pngjs in Node.
+const result = decode(imageData, { adaptive: true });
+
 if (result) {
-  console.log(result.text, "v" + result.version, result.ecLevel);
+  console.log(result.text);                           // the payload
+  console.log("v" + result.version, result.ecLevel);  // e.g. "v40 L"
 } else {
-  // no decode — fail-closed: quirc-mesh returns null rather than a wrong payload
+  // No decode. Not a wrong decode — see "The promise" below.
 }
 ```
 
-Options — `decode(imageData, { mesh, adaptive })`:
-- **`mesh`** (default `true`): piecewise alignment-pattern mesh sampling — the
-  high-version-from-camera capability. `false` falls back to a single homography (quirc-equivalent).
-- **`adaptive`** (default `false`): local block binarization for uneven lighting. Enable for
-  **webcam** frames; leave off for clean scans (global Otsu is exact there).
+Two options are worth knowing:
 
-Returns `{ text, bytes, version, ecLevel, mask, dataType, eci, corners }` or `null`. Also exported:
-`decodeAll` (all codes in a frame) and `decodeDebug` (adds detection diagnostics). Pure ESM, runs
-in browsers and Node ≥18, **no runtime dependencies, no WASM**. Live webcam demo: `harness/camera.html`
-(`npm run serve`).
+- **`adaptive: true`** — local binarization for uneven webcam lighting. Turn it on for camera frames; leave it off (the default) for clean scans, where a single global threshold is already exact.
+- **`mesh: true`** (the default) — the piecewise sampling described above. Set it to `false` and you get the classic single-transform behavior. Handy for an A/B comparison; it will fail the hard cases on purpose.
 
-## Start here (reading order)
+There's also `decodeAll` (every code in a frame) and `decodeDebug` (adds detection diagnostics). A live webcam demo lives in `harness/camera.html` — clone the repo and run `npm run serve`.
 
-1. **`PRD.md`** — what we're building, goals, non-goals, success criteria, acceptance tests.
-2. **`docs/PRIOR_ART.md`** — why the small libs fail, why zxing-cpp wins, links + the exact quirc code that's the problem.
-3. **`docs/ALGORITHM.md`** — the mesh-sampling algorithm in detail (the actual work).
-4. **`IMPLEMENTATION_PLAN.md`** — phased plan, milestones, where to start coding.
-5. **`docs/BENCHMARK_PLAN.md`** — the JS-vs-WASM decision and how to measure it.
+## When you should (and shouldn't) reach for this
 
-## What's in this bundle
+I'd rather point you at the right tool, even when it isn't this one.
 
-```
-quirc-mesh/
-├── README.md                 ← you are here
-├── PRD.md                    product requirements + acceptance criteria
-├── IMPLEMENTATION_PLAN.md    phased build plan
-├── package.json              deps for the harness/oracle (not yet installed)
-├── docs/
-│   ├── PRIOR_ART.md          why existing decoders fail; references; prior art
-│   ├── ALGORITHM.md          mesh grid-sampling design (the core IP)
-│   └── BENCHMARK_PLAN.md     JS-native vs WASM benchmark + acceptance thresholds
-├── reference/quirc/          PINNED quirc source (ISC) — read identify.c/decode.c
-│   ├── lib/*.c, *.h          the code we're forking
-│   ├── LICENSE               ISC
-│   └── PROVENANCE.md         commit + sha256 of every vendored file
-├── test-vectors/
-│   ├── images/               the QR PNGs (incl. PRINTED v37/v40 — reuse for camera tests)
-│   ├── expected/<name>.txt   exact decoded payload each image MUST yield (byte-for-byte)
-│   ├── manifest.json         index: file, sha256, version, modules, EC, charCount
-│   ├── gen-sample-qr.js      regenerates the 3 named vectors (qrcode lib)
-│   └── build-manifest.mjs    re-derives expected/* + manifest.json via zxing-cpp oracle
-└── harness/                  validation harness skeleton (clean-image + camera PoC)
-    └── README.md
-```
+**Use quirc-mesh when** you need to read *large* QR codes (roughly v20 and up) from a *camera*, and you care about reading the decoder with your own eyes — no WASM, no build step, no dependencies.
 
-## The acid test (the whole point)
+**Don't bother when** your codes are small and your input is a clean image. jsQR is smaller and completely fine for that; you won't notice the difference. And if you decode from cameras at scale and don't need auditability, zxing-cpp is, and will remain, far more mature than this. quirc-mesh is deliberately narrow: it's the decoder you pick when the small ones fail you *and* a megabyte of WASM isn't an option.
 
-`test-vectors/images/qr_worst_2of3_fullkey_ECL.png` is a **v40, EC-L** code (177×177 modules). Its decoded payload is in `test-vectors/expected/qr_worst_2of3_fullkey_ECL.txt`.
+Also: it **decodes**, it doesn't generate. Plenty of good libraries make QR codes; this one only reads them.
 
-- The original author **printed this sheet at 100% zoom** (≈ ⅔ of an A4) and confirmed **zxing-cpp WASM reads it from the Framework 13's own 1080p webcam** (5.6 px/module, both Firefox & Chrome).
-- The pure-JS decoders **fail the same sheet**.
-- **quirc-mesh succeeds iff it reads that same printed sheet from a webcam, producing the exact expected payload.** That printout can be reused — the vectors here are byte-identical to it.
+## The promise: wrong is worse than nothing
 
-## Status
+This started life inside a backup tool, and that left a mark on the design.
 
-**Working pure-JS decoder** (`src/`). Acceptance criteria met:
+If you're recovering a secret key from a sheet of paper, a decoder that confidently returns the *wrong* bytes is a catastrophe — much worse than one that says "I couldn't read it, hold still and try again." So quirc-mesh is **fail-closed**: every result is gated on Reed–Solomon and the format/version checksums actually verifying. If they don't, you get `null`. Never a plausible-looking lie.
 
-- **AC-1** clean v7–v40 byte-exact — 10/10 (`npm run harness`).
-- **AC-2** the printed **v40** reads from the Framework 13 1080p webcam in **Chrome and Firefox**,
-  byte-exact, at 3.4–5.0 px/module (the case stock quirc/jsQR/zxing-js fail).
-- **AC-4** fail-closed — **0 wrong reads across 900 fuzz trials** (`npm run fuzz`).
-- **AC-5** ~1.9 kLOC, no runtime deps.
-- **AC-6** pure-JS, **~49 ms/frame** p90 for v40 — ~20× under the responsiveness bar, so **no WASM**.
+I lean on this hard. Across 900 fuzzing trials — corrupted bits, added noise, random crops — it produced **zero** wrong reads. Null or correct, nothing in between. That's the one invariant I'd ask you to trust.
 
-Unit + integration suite: `npm test` (21 tests). Full build log and every design decision are in
-**`docs/NOTES.md`**. Remaining: optional finder-grouping robustness for extreme close-up/tilt, and
-wiring into Banana Split's v2 recovery path.
+## Does it actually work?
 
-## A note on git
+The honest test wasn't a benchmark. It was printing the worst code I had at 100% zoom — about two-thirds of an A4 sheet — and holding it up to a Framework 13's built-in 1080p webcam.
 
-This folder currently lives inside the `banana_split` working tree as an untracked subfolder. It is intended to become its **own standalone repository** (it's independently useful and cleanly ISC-licensable as a quirc fork). Decide repo layout before committing; don't accidentally commit it into `banana_split`.
+That code is a **v40, EC-level-L, 177×177-module** monster: a full 4096-bit key packed into a single shard. quirc-mesh reads it byte-exact, in **both Chrome and Firefox**, at 3.4–5.0 pixels per module — right at the edge of what the sensor can resolve. That's precisely the case stock quirc, jsQR, and zxing-js all fail.
+
+A few numbers for calibration:
+
+- Clean v7–v40 images: **10/10** byte-exact.
+- A v40 frame decodes in **~49 ms (p90)** in pure JS — fast enough that WebAssembly bought nothing, so there is none.
+- **~1.9k lines** of decoder. Zero runtime dependencies.
+
+It's early (`0.1.0`). The decoder core is solid; the part still rough is the detection front-end, which can be fooled by extreme tilt or a code shoved right up against the lens. That's what I'm hardening next.
+
+## How it actually works
+
+The code is meant to be read — that was the whole point. If you want the real thing:
+
+- **`docs/ALGORITHM.md`** — the mesh sampling design, in detail.
+- **`docs/PRIOR_ART.md`** — why the small libraries fail and why zxing-cpp wins, with links and the exact upstream code that's the culprit.
+- **`docs/NOTES.md`** — a running log of every assumption and design decision made while building this, so any choice can be traced back and argued with later.
+
+The pipeline, end to end: binarize → find the finder patterns → group them into a code → read format and version → locate the alignment patterns → build the mesh → sample the module matrix → undo the mask → Reed–Solomon → decode the segments. quirc owns most of those steps; the alignment / mesh / sampling middle is the new part.
+
+## Credits
+
+quirc-mesh is a derivative work of **[quirc](https://github.com/dlbeer/quirc)** by **Daniel Beer**, whose detection and decoding pipeline it ports almost verbatim. quirc is a genuinely lovely piece of C — small enough to read in an afternoon — and none of this would exist without it. Its copyright notice is preserved in `LICENSE` and under `reference/quirc/`.
+
+The thing it was built for is **[Banana Split](https://github.com/paritytech/banana_split)**, a Shamir-secret-sharing paper-backup tool that needs to scan dense shards on its recovery path without bundling a binary blob.
 
 ## License
 
-Derives from quirc (ISC). Keep the fork ISC (or MIT) so it stays freely reusable. Preserve quirc's copyright notice (see `reference/quirc/LICENSE`).
+[ISC](./LICENSE), same as quirc. Use it for anything.
