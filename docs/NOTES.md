@@ -109,3 +109,47 @@ Run units with `npm test`; clean-image integration with `npm run harness`.
 - **`node --test` needs file globs** (`test/*.test.js`), not a bare `test/` dir, on Node 22.
 - **Clean-image latency (Node, informational):** ~8-33 ms/decode v7-v40. Comfortably within
   the AC-6 budget; real measurement is the camera path (M5).
+
+---
+
+## M2 — Mesh grid-sampling + version pinning (core IP; proven on synthetic)
+
+New modules: `alignment.js` (locate all alignment patterns + 3 finder-derived corners),
+`mesh.js` (Option A per-cell bilinear), `version_info.js` (version-info BCH). `sample.js`
+gained `extractCodeMesh` (3x3 vote). `index.decode(img, {mesh=true})` selects the path.
+New test `mesh.test.js` proves the IP; `npm test` is 16/16; clean harness stays 10/10.
+
+- **The mesh works.** Under pure radial (non-projective) lens distortion, the mesh decodes
+  high-version codes the single homography cannot — verified for **v25, v34, v37, and v40**
+  (the AC-2 acid-test code). A single homography models any *flat perspective* exactly, so
+  the distinguishing distortion in all synthetic tests is radial/curl, which is exactly what
+  the alignment-pattern mesh corrects. `test/mesh.test.js` locks in v25/v34/v40 wins at
+  k1=0.025 (single fails, mesh succeeds, byte-exact).
+- **quirc's v21 apat is a typo (92, should be 94 = gridSize-7).** quirc tolerates it because
+  apat only feeds fitness + the ±3 reserved-cell test; the mesh uses apat as EXACT anchors,
+  so it broke clean v21. Fixed the value and added `alignmentPositions(v)` (canonical ISO
+  algorithm, with the v32 step=26 special case) as the authoritative source; a unit test
+  asserts the whole table matches it. The mesh and `reserved_cell` now use spec-correct
+  positions.
+- **Mesh construction (Option A).** Control grid = apat x apat (N x N). Its three corners
+  (0,0),(N-1,0),(0,N-1) always coincide with the finders (apat[N-1]==gridSize-7), so those
+  control points come from the finders' own 7x7 perspectives at module-center local coords
+  (e.g. TL = `perspectiveMapF(caps[1].c, 6.5, 6.5)`). Interior + bottom-right nodes are
+  located by image search; missing ones filled by the parallelogram rule
+  `AP(i-1,j)+AP(i,j-1)-AP(i-1,j-1)` (zxing-cpp's trick), then global transform as last resort.
+  Border modules (outside the outer apat lines) extrapolate from the nearest cell.
+- **Alignment search params:** window ±2 modules around the coarse-transform guess; accept a
+  candidate at score >= 14/17 on the concentric 5x5 profile (center dark, ring-1 light,
+  ring-2 dark); refine to the centroid of the dark center module. Tunable in `alignment.js`.
+- **Version-info BCH (addition over stock quirc).** `measure_grid_size` drifts under
+  distortion and returned wrong sizes (v25->121, v34->157, v37->169) — fatal for both paths.
+  `refineVersion` rebuilds the perspective for candidate versions near the estimate, reads
+  the two 18-bit version blocks (ISO order, matching ZXing) and BCH-decodes (Hamming<=3) to
+  PIN the true version, correcting gridSize + perspective. This unlocked the v25/v34/v37
+  mesh wins above. BCH generator 0x1f25; verified encode(v7)=0x07C94.
+- **Open limiter -> M3: quirc's detection/grouping is fragile under distortion** (and
+  non-monotonic in distortion strength — e.g. k1=0.01 can fail where 0.015 succeeds). When a
+  grid IS detected, mesh+version-info decode it correctly even where single fails; when
+  detection yields 0 grids, nothing downstream can help. Making the finder/grouping robust
+  (and adaptive binarization for camera lighting) is the M3 critical path, validated
+  ultimately by the physical camera test.

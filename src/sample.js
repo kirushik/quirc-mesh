@@ -35,6 +35,32 @@ export function extractCode(q, index) {
   return { size, cells, corners };
 }
 
+// Extract the module matrix via a sampling mesh (M2). Each module is decided by a
+// 3x3 vote of sub-module samples mapped through the local mesh cell, for noise
+// immunity. `mesh` has map(gx,gy)->{x,y}; `qr` provides gridSize.
+const VOTE = [0.3, 0.5, 0.7];
+export function extractCodeMesh(q, qr, mesh) {
+  const size = qr.gridSize;
+  const cells = new Uint8Array(size * size);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      let dark = 0;
+      for (let v = 0; v < 3; v++) {
+        for (let u = 0; u < 3; u++) {
+          const p = mesh.map(x + VOTE[u], y + VOTE[v]);
+          const xi = Math.round(p.x), yi = Math.round(p.y);
+          if (xi >= 0 && yi >= 0 && xi < q.w && yi < q.h && q.pixels[yi * q.w + xi]) dark++;
+        }
+      }
+      if (dark >= 5) cells[y * size + x] = 1;
+    }
+  }
+  const corners = [
+    mesh.map(0, 0), mesh.map(size, 0), mesh.map(size, size), mesh.map(0, size),
+  ];
+  return { size, cells, corners };
+}
+
 // Cell accessor for decode.js (mirrors quirc grid_bit).
 export function gridBit(code, x, y) {
   return code.cells[y * code.size + x];

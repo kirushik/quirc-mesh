@@ -45,7 +45,7 @@ export const VERSION_DB = [
   { dataBytes: 901,  apat: [6,30,56,82],                ecc: [[69,43,9],[150,120,5],[42,14,2],[50,22,17]] },// v18
   { dataBytes: 991,  apat: [6,30,58,86],                ecc: [[70,44,3],[141,113,3],[39,13,9],[47,21,17]] },// v19
   { dataBytes: 1085, apat: [6,34,62,90],                ecc: [[67,41,3],[135,107,3],[43,15,15],[54,24,15]] },// v20
-  { dataBytes: 1156, apat: [6,28,50,72,92],             ecc: [[68,42,17],[144,116,4],[46,16,19],[50,22,17]] },// v21
+  { dataBytes: 1156, apat: [6,28,50,72,94],             ecc: [[68,42,17],[144,116,4],[46,16,19],[50,22,17]] },// v21 (apat last fixed 92->94; quirc's table has a typo here, see alignmentPositions)
   { dataBytes: 1258, apat: [6,26,50,74,98],             ecc: [[74,46,17],[139,111,2],[37,13,34],[54,24,7]] },// v22
   { dataBytes: 1364, apat: [6,30,54,78,102],            ecc: [[75,47,4],[151,121,4],[45,15,16],[54,24,11]] },// v23
   { dataBytes: 1474, apat: [6,28,54,80,106],            ecc: [[73,45,6],[147,117,6],[46,16,30],[54,24,11]] },// v24
@@ -66,6 +66,21 @@ export const VERSION_DB = [
   { dataBytes: 3532, apat: [6,26,54,82,110,138,166],    ecc: [[75,47,40],[147,117,20],[45,15,10],[54,24,43]] },// v39
   { dataBytes: 3706, apat: [6,30,58,86,114,142,170],    ecc: [[75,47,18],[148,118,19],[45,15,20],[54,24,34]] },// v40
 ];
+
+// Canonical ISO/IEC 18004 alignment-pattern center positions for a version.
+// This is the authoritative source for the `apat` arrays above (which are the
+// verbatim quirc table, except quirc's v21 typo which we corrected). The mesh
+// sampler needs these EXACT — unlike quirc's single-homography path, which only
+// uses apat for fitness scoring and a +/-3-tolerant reserved-cell test.
+export function alignmentPositions(version) {
+  if (version <= 1) return [];
+  const n = Math.floor(version / 7) + 2;          // number of positions per axis
+  const step = version === 32 ? 26 : Math.ceil((version * 4 + 4) / (n * 2 - 2)) * 2;
+  const pos = new Array(n);
+  pos[0] = 6;
+  for (let i = n - 1; i >= 1; i--) pos[i] = version * 4 + 10 - (n - 1 - i) * step;
+  return pos;
+}
 
 export function gridSize(version) {
   return version * 4 + 17;
