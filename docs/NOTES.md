@@ -211,3 +211,32 @@ comparison. The detection-robustness engineering and the physical acid test rema
     reads were 3.4–5.0 px/mod; downscaling 1920->1280 would drop v40 below the decode floor).
   - Guarded by `test/robustness.test.js` (noise/blank -> null; cluttered v40 -> correct-or-null,
     bounded < 1.5 s). Suite now 19/19; clean 10/10 unchanged.
+
+---
+
+## M5 — Benchmark & JS-vs-WASM decision (done; AC-6)
+
+`harness/bench.mjs` (`npm run bench`) times per-frame decode over the clean corpus, quirc-mesh
+(pure JS) vs zxing-cpp (WASM), median/p90. The v40 PNG is 1480x1480 (~2.2 MP ≈ a 1080p frame),
+so it tracks the camera worst case.
+
+Node v22.22.2, 40 iters, median/p90 ms:
+
+| version | quirc-mesh JS | zxing-cpp WASM |
+|---|---|---|
+| v7  | 5.5 / 5.8   | 1.1 / 1.3  |
+| v17 | 13.1 / 14.7 | 4.0 / 4.5  |
+| v25 | 22.4 / 24.3 | 7.4 / 8.1  |
+| v34 | 35.2 / 37.1 | 12.2 / 13.4 |
+| v37 | 42.2 / 45.4 | 14.8 / 15.5 |
+| **v40** | **46.5 / 48.6** | **16.6 / 17.7** |
+
+Both decode 10/10 of the clean corpus (success parity). In-browser (user, Framework 13, live
+camera, mesh + adaptive) v40 measured ~42-46 ms/frame in both Chrome and Firefox — consistent
+with Node, so adaptive-binarizer overhead is negligible.
+
+**DECISION: ship PURE-JS, no WASM.** v40 p90 is **~49 ms** — roughly **20x under** the ~1 s/frame
+responsiveness bar (a scanning loop locks on in 1-2 frames). Pure JS is ~2.8x slower than the
+WASM blob, but that's irrelevant at this scale, and it eliminates the opaque-blob
+provenance/audit problem entirely (PRD §2.1 — the whole point of the project). WASM stays a
+documented contingency only; not needed.

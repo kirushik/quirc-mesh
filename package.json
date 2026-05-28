@@ -10,6 +10,7 @@
     "harness": "node harness/run.mjs",
     "synth:gen": "node harness/gen-distorted.mjs",
     "synth": "node harness/run-synth.mjs",
+    "bench": "node harness/bench.mjs",
     "serve": "node harness/serve.mjs",
     "manifest": "node test-vectors/build-manifest.mjs"
   },
