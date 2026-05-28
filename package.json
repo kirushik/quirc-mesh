@@ -11,6 +11,7 @@
     "synth:gen": "node harness/gen-distorted.mjs",
     "synth": "node harness/run-synth.mjs",
     "bench": "node harness/bench.mjs",
+    "fuzz": "node harness/fuzz.mjs",
     "serve": "node harness/serve.mjs",
     "manifest": "node test-vectors/build-manifest.mjs"
   },

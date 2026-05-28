@@ -240,3 +240,26 @@ responsiveness bar (a scanning loop locks on in 1-2 frames). Pure JS is ~2.8x sl
 WASM blob, but that's irrelevant at this scale, and it eliminates the opaque-blob
 provenance/audit problem entirely (PRD §2.1 — the whole point of the project). WASM stays a
 documented contingency only; not needed.
+
+---
+
+## M4 — Fail-closed hardening (done; AC-4)
+
+The property for a backup tool: **null or the exact correct payload, never a wrong one.**
+
+- **Emit-path audit (single RS gate).** `decode`/`decodeAll`/`decodeDebug` only build a result
+  from the `data` returned by `tryDecode`, which returns null unless `decodeCode` is SUCCESS.
+  `decodeCode` returns data only if (a) `readFormat` BCH validates, (b) `codestreamEcc` succeeds
+  — and `correctBlock` re-checks the RS syndromes *after* correction, returning DATA_ECC on any
+  residual — and (c) `decodePayload` succeeds. There is **no path that emits a result without RS
+  success.** Version-info BCH (Hamming<=3, either copy) only sets the grid size; a false version
+  makes RS fail, it can't by itself produce a payload.
+- **Fuzz measurement** (`harness/fuzz.mjs`, `npm run fuzz`): **900 trials → 0 wrong reads.**
+  Pixel-corruption sweeps (2-50%) on v10/v25/v40 degrade gracefully (correct -> null, never
+  wrong); pure noise yields **0** false-positive decodes; crops (40/60/80%) yield 0 wrong. Locked
+  a bounded version into `test/failclose.test.js` (suite now 21/21).
+- **Residual theoretical risk:** an RS false-accept (errors beyond correction capacity aliasing
+  onto another valid codeword) could in principle emit garbage bytes. Not observed in 900 trials;
+  QR's RS minimum distance makes it astronomically unlikely; and Banana Split's wire format has
+  its own authenticated-integrity backstop above the QR layer (PRD / ALGORITHM.md §6). We do not
+  add structural gates that would trade recall for a risk RS already covers.
