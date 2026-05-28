@@ -25,7 +25,15 @@
   .ok { background: #0c3; color: #021; }
   .fail { background: #511; color: #fbb; }
   .warn { background: #5a4500; color: #ffd; }
-  pre { white-space: pre-wrap; word-break: break-all; background: #000; border: 1px solid #333; padding: 10px; border-radius: 6px; max-height: 180px; overflow: auto; }
+  pre { white-space: pre-wrap; word-break: break-all; background: #000; border: 1px solid #333; padding: 10px; border-radius: 6px; max-height: 140px; overflow: auto; }
+  h2 { font-size: 13px; color: #9bf; text-transform: uppercase; letter-spacing: .05em; margin: 16px 0 4px; }
+  .stale { opacity: .55; }
+  ol#log { margin: 0; padding-left: 22px; max-height: 200px; overflow: auto; }
+  ol#log li { font-variant-numeric: tabular-nums; }
+  ol#log li.miss { color: #fb8; }
+  ol#log li.hit { color: #7e7; }
+  .logrow { display: flex; gap: 12px; align-items: center; }
+  .logrow button { padding: 2px 8px; font-size: 12px; }
 </style>
 </head>
 <body>
@@ -51,16 +59,25 @@
       <button id="toggle">Pause</button>
     </div>
     <div id="banner" class="banner warn">starting…</div>
+
+    <h2>live (current frame)</h2>
     <div class="stat">
       <div>frame</div><div id="s-frame">—</div>
       <div>decode time</div><div id="s-ms">—</div>
       <div>detection</div><div id="s-det">—</div>
+    </div>
+
+    <h2>last decode <span id="s-stale" style="text-transform:none;color:#888"></span></h2>
+    <div class="stat" id="last">
       <div>version / EC</div><div id="s-ver">—</div>
       <div>px / module</div><div id="s-ppm">—</div>
       <div>payload match</div><div id="s-match">—</div>
-      <div>best so far</div><div id="s-best">—</div>
+      <div>fastest decode</div><div id="s-best">—</div>
     </div>
-    <pre id="text">(decoded payload appears here)</pre>
+    <pre id="text">(last decoded payload appears here)</pre>
+
+    <h2 class="logrow">history <button id="clearlog">clear</button></h2>
+    <ol id="log"></ol>
     <small id="rfp" style="color:#fa6"></small>
   </div>
 </main>
@@ -87,11 +104,38 @@ const els = {
   best: document.getElementById("s-best"),
   text: document.getElementById("text"),
   rfp: document.getElementById("rfp"),
+  stale: document.getElementById("s-stale"),
+  last: document.getElementById("last"),
+  log: document.getElementById("log"),
+  clearlog: document.getElementById("clearlog"),
 };
 
 let expectedMap = {};   // name -> payload text
 let running = true;
 let bestMs = Infinity;
+let lastDecodeAt = 0;   // wall-clock of the most recent successful decode
+let lastLogText = null; // payload of the last logged entry (to throttle the log)
+let lastLogAt = 0;
+
+function nowStr() {
+  return new Date().toLocaleTimeString();
+}
+
+function logEntry(text, exact, version, ec, ppmVal, ms) {
+  // Throttle: log a new line only on a changed payload or after a 1.2s gap, so a
+  // held code doesn't flood the history but repeated trials are all captured.
+  const t = performance.now();
+  if (text === lastLogText && t - lastLogAt < 1200) return;
+  lastLogText = text;
+  lastLogAt = t;
+  const li = document.createElement("li");
+  li.className = exact ? "hit" : "miss";
+  li.textContent = `${nowStr()}  v${version} ${ec}  ${exact ? "MATCH ✓" : "≠ expected"}  ${ppmVal ? ppmVal.toFixed(2) + " px/mod" : ""}  ${ms.toFixed(0)}ms`;
+  els.log.prepend(li);
+  while (els.log.children.length > 50) els.log.lastChild.remove();
+}
+
+els.clearlog.addEventListener("click", () => { els.log.innerHTML = ""; lastLogText = null; });
 
 // Load the corpus list so the user can verify byte-exact match against a vector.
 try {
@@ -177,19 +221,33 @@ function tick() {
     if (r) {
       drawOverlay(r.corners);
       const p = ppm(r.corners, r.version);
-      els.ver.textContent = `v${r.version} / ${r.ecLevel}`;
-      els.ppm.textContent = p ? p.toFixed(2) : "—";
-      els.text.textContent = r.text;
       const want = expectedMap[els.expected.value];
       const exact = want != null && r.text === want;
+
+      // Sticky "last decode" — these persist after the code leaves the frame.
+      els.ver.textContent = `v${r.version} / ${r.ecLevel}`;
+      els.ppm.textContent = p ? p.toFixed(2) : "—";
       els.match.textContent = want == null ? "(no expected loaded)" : exact ? "EXACT ✓" : "decoded, but ≠ expected";
+      els.text.textContent = r.text;
       if (ms < bestMs) { bestMs = ms; els.best.textContent = `${ms.toFixed(0)} ms`; }
+      els.last.classList.remove("stale");
+      els.stale.textContent = "";
+      lastDecodeAt = Date.now();
+
+      logEntry(r.text, exact, r.version, r.ecLevel, p, ms);
+
       if (exact) { els.banner.className = "banner ok"; els.banner.textContent = "MATCH ✓ — printed code read correctly"; }
       else { els.banner.className = "banner warn"; els.banner.textContent = "decoded a code (check it matches the selected vector)"; }
     } else {
-      els.ver.textContent = "—"; els.ppm.textContent = "—"; els.match.textContent = "—";
+      // No code in this frame: keep the last-decode panel (dimmed), only update the
+      // live banner so repeated trials remain readable.
+      if (lastDecodeAt) {
+        els.last.classList.add("stale");
+        const ago = ((Date.now() - lastDecodeAt) / 1000).toFixed(0);
+        els.stale.textContent = `(no code in frame — last read ${ago}s ago)`;
+      }
       els.banner.className = "banner fail";
-      els.banner.textContent = "no decode — hold steady, fill the frame, ensure focus";
+      els.banner.textContent = "scanning… (no code in frame)";
     }
   }
   requestAnimationFrame(tick);
