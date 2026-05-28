@@ -1,0 +1,127 @@
+{
+  "generatedBy": "zxing-cpp (WASM) via zxing-wasm — ground truth",
+  "generatedAt": "2026-05-28",
+  "warning": "Payloads are random data, not real secrets. A correct decoder must reproduce expectedFile byte-for-byte.",
+  "vectors": [
+    {
+      "file": "images/qr_easy_3of5_seedphrase_ECH.png",
+      "sha256": "8b03dc9b28c219a1b9ee53b9bb08550459199c37d570909d0b6cdcf47813a960",
+      "pngPx": "520x520",
+      "version": 10,
+      "modules": 57,
+      "ecLevel": "H",
+      "charCount": 164,
+      "prefix": "BS2 05 3 02 ",
+      "expectedFile": "expected/qr_easy_3of5_seedphrase_ECH.txt",
+      "note": "seed-phrase sized; scans on everything (control)"
+    },
+    {
+      "file": "images/qr_ladder_v07.png",
+      "sha256": "381639c73be357596e404f8007a6d136b57c033501a2128d55f108339a44e64c",
+      "pngPx": "424x424",
+      "version": 7,
+      "modules": 45,
+      "ecLevel": "M",
+      "charCount": 177,
+      "prefix": "BS2 05 3 02 ",
+      "expectedFile": "expected/qr_ladder_v07.txt",
+      "note": "clean-image regression rung"
+    },
+    {
+      "file": "images/qr_ladder_v12.png",
+      "sha256": "c2715eecf2ab1878ad6aa74b36353e16eb7a6dd6ff34707a4e5972d996f92f14",
+      "pngPx": "584x584",
+      "version": 12,
+      "modules": 65,
+      "ecLevel": "M",
+      "charCount": 372,
+      "prefix": "BS2 05 3 02 ",
+      "expectedFile": "expected/qr_ladder_v12.txt",
+      "note": "clean-image regression rung"
+    },
+    {
+      "file": "images/qr_ladder_v17.png",
+      "sha256": "12cf1de667ee200eebc27daeaee4f84fa9ee4b60d81ee6a5e9fa119b0707108c",
+      "pngPx": "744x744",
+      "version": 17,
+      "modules": 85,
+      "ecLevel": "M",
+      "charCount": 657,
+      "prefix": "BS2 05 3 02 ",
+      "expectedFile": "expected/qr_ladder_v17.txt",
+      "note": "clean-image regression rung"
+    },
+    {
+      "file": "images/qr_ladder_v21.png",
+      "sha256": "17c04dfae278aea8faebbfa9f7cf820fdc2dc197e948d796cb63b8fbbe0a5065",
+      "pngPx": "872x872",
+      "version": 21,
+      "modules": 101,
+      "ecLevel": "M",
+      "charCount": 987,
+      "prefix": "BS2 05 3 02 ",
+      "expectedFile": "expected/qr_ladder_v21.txt",
+      "note": "clean-image regression rung"
+    },
+    {
+      "file": "images/qr_ladder_v25.png",
+      "sha256": "cdd2ca787114bb5053bc9921d8ce121084808737d2bb7aca50912140def39583",
+      "pngPx": "1000x1000",
+      "version": 25,
+      "modules": 117,
+      "ecLevel": "M",
+      "charCount": 1392,
+      "prefix": "BS2 05 3 02 ",
+      "expectedFile": "expected/qr_ladder_v25.txt",
+      "note": "clean-image regression rung"
+    },
+    {
+      "file": "images/qr_ladder_v30.png",
+      "sha256": "617688201dc82d062b616d79b2988dd4ff2f52d45c30865edf608a2a5da6c2a0",
+      "pngPx": "1160x1160",
+      "version": 30,
+      "modules": 137,
+      "ecLevel": "M",
+      "charCount": 1857,
+      "prefix": "BS2 05 3 02 ",
+      "expectedFile": "expected/qr_ladder_v30.txt",
+      "note": "clean-image regression rung"
+    },
+    {
+      "file": "images/qr_ladder_v34.png",
+      "sha256": "31f75fe152b8a294b4b5737a02bcf83749506511feec2c743325dc746f510b43",
+      "pngPx": "1288x1288",
+      "version": 34,
+      "modules": 153,
+      "ecLevel": "M",
+      "charCount": 2412,
+      "prefix": "BS2 05 3 02 ",
+      "expectedFile": "expected/qr_ladder_v34.txt",
+      "note": "clean-image regression rung"
+    },
+    {
+      "file": "images/qr_mid_3of5_fullkey_ECM.png",
+      "sha256": "db2367166053ad69b386b9772c9fa5b99dcf4f67be39890f770234e825b4b3b1",
+      "pngPx": "1384x1384",
+      "version": 37,
+      "modules": 165,
+      "ecLevel": "M",
+      "charCount": 2877,
+      "prefix": "BS2 05 3 02 ",
+      "expectedFile": "expected/qr_mid_3of5_fullkey_ECM.txt",
+      "note": "3-of-5 full 4096 keypair fragment; PRINTED & camera-tested"
+    },
+    {
+      "file": "images/qr_worst_2of3_fullkey_ECL.png",
+      "sha256": "707fbbc00c031e71f78980e20c6f9eb5d22e2ba3e0264f1bf9e5d7b794f95ac5",
+      "pngPx": "1480x1480",
+      "version": 40,
+      "modules": 177,
+      "ecLevel": "L",
+      "charCount": 4278,
+      "prefix": "BS2 05 3 02 ",
+      "expectedFile": "expected/qr_worst_2of3_fullkey_ECL.txt",
+      "note": "2-of-3 stress case; full 4096 keypair fragment; PRINTED & camera-tested (zxing-cpp WASM: OK at 5.6 px/module)"
+    }
+  ]
+}

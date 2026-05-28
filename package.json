@@ -1,0 +1,16 @@
+{
+  "name": "quirc-mesh",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Small auditable QR decoder that reads high-version (v20-v40) codes from a camera, via piecewise alignment-pattern mesh sampling. Fork of dlbeer/quirc.",
+  "license": "ISC",
+  "scripts": {
+    "test": "node harness/run.mjs",
+    "manifest": "node test-vectors/build-manifest.mjs"
+  },
+  "devDependencies": {
+    "pngjs": "^7.0.0",
+    "zxing-wasm": "^1.0.0"
+  }
+}
