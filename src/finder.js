@@ -310,6 +310,17 @@ function recordQrGrid(q, a, b, c) {
 
   measureGridSize(q, qrIndex);
 
+  // Reject implausible grids early. Noise/clutter (hands, shadows) spawns many
+  // false capstones whose geometry implies versions far outside 1..40; recording
+  // them wastes huge time in jiggle/fitness over giant grid sizes (a source of
+  // browser "page unresponsive" freezes) and they can never decode anyway.
+  const gridVersion = (qr.gridSize - 17) / 4;
+  if (gridVersion < 1 || gridVersion > 40 || !Number.isInteger(gridVersion)) {
+    for (let i = 0; i < 3; i++) q.capstones[qr.caps[i]].qrGrid = -1;
+    q.grids.pop();
+    return;
+  }
+
   const inter = lineIntersect(
     q.capstones[a].corners[0], q.capstones[a].corners[1],
     q.capstones[c].corners[0], q.capstones[c].corners[3]);

@@ -66,7 +66,7 @@ function locateApat(q, ex, ey, m) {
 // metadata. Returns null if the version has too few alignment lines for a mesh.
 export function buildControlGrid(q, qr) {
   const version = (qr.gridSize - 17) / 4;
-  if (version < 2) return null;
+  if (version < 2 || version > 40 || !Number.isInteger(version)) return null;
   const apat = VERSION_DB[version].apat;
   const N = apat.length;
   if (N < 2) return null;

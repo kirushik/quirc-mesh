@@ -186,3 +186,28 @@ comparison. The detection-robustness engineering and the physical acid test rema
   zxing-style finder grouping); (2) the **physical camera acid test** (user-run, Framework 13,
   Chrome+Firefox, printed v40/v37) — the ground-truth validator that also tells us whether the
   synthetic is representative.
+
+### M3 update — AC-2 PASSED on real hardware + freeze fixes
+
+- **AC-2 met (user-confirmed 2026-05-28).** The printed v40 (`qr_worst`) reads from the
+  Framework 13 1080p webcam in **both Chrome and Firefox**, byte-exact, across **3.4–5.0
+  px/module**. v37 and v10 also decoded (they showed "≠ expected" only because the v40 vector
+  was selected in the dropdown — real reads, RS-validated, so AC-4 holds). The mesh works on
+  the real acid test, not just synthetic. This is the make-or-break criterion.
+- **Browser freeze on large/close codes — root-caused and fixed.** Reproduced in Node only
+  once the frame had camera-like clutter (dark "hand" blobs + sensor noise):
+  - *Crash:* `buildControlGrid` indexed `VERSION_DB[version]` for an out-of-range version →
+    guarded (version 2..40, integer).
+  - *Freeze (1653 ms):* noise spawns up to MAX_CAPSTONES(32) false finders → bogus grids with
+    versions **v49–v153**; `jiggle_perspective`/`fitness_all` then churn over those giant grid
+    sizes. Fix: reject implausible grids (version <1 or >40) in `record_qr_grid` **before** the
+    expensive jiggle. Result: **1653 ms → 145 ms**, bogus grids gone.
+  - *"Aw snap" (OOM):* the JS flood-fill had no depth bound (I'd dropped quirc's fixed stack).
+    Restored a generous depth cap (`max(512, 2*h)`) so giant clutter regions can't grow the
+    frame stack without limit (mirrors quirc's "stack overflow -> just stop").
+  - `camera.html`: split into an rAF preview loop + a **throttled, non-overlapping** decode
+    loop that yields between runs, so a heavy frame can't make the page unresponsive. Kept
+    **full resolution — NOT downscaled**, because v40 sits near the px/module limit (the user's
+    reads were 3.4–5.0 px/mod; downscaling 1920->1280 would drop v40 below the decode floor).
+  - Guarded by `test/robustness.test.js` (noise/blank -> null; cluttered v40 -> correct-or-null,
+    bounded < 1.5 s). Suite now 19/19; clean 10/10 unchanged.

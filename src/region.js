@@ -33,7 +33,7 @@ function getFrame(stack, idx) {
 
 // Scan the row adjacent to frame `vars` (in `direction`) for a connected run of
 // `from`; on the first hit, push a new frame for it and return its index, else -1.
-function callNext(q, from, to, spanFunc, stack, varsIdx, direction) {
+function callNext(q, from, to, spanFunc, stack, varsIdx, direction, cap) {
   const vars = stack[varsIdx];
   const rowY = vars.y + direction;
   const rowOff = rowY * q.w;
@@ -46,6 +46,10 @@ function callNext(q, from, to, spanFunc, stack, varsIdx, direction) {
       // resume because the pixel is now `to`).
       if (direction < 0) vars.leftUp = lp; else vars.leftDown = lp;
       const nvIdx = varsIdx + 1;
+      // Stack-depth cap (quirc's "stack overflow -> just stop" guard). Prevents
+      // pathological huge/complex regions (hands, shadows) from growing the frame
+      // stack without bound — a source of out-of-memory crashes in-browser.
+      if (nvIdx >= cap) return -1;
       const nv = getFrame(stack, nvIdx);
       nv.y = rowY;
       const r = floodFillLine(q, lp, rowY, from, to, spanFunc);
@@ -63,6 +67,9 @@ function callNext(q, from, to, spanFunc, stack, varsIdx, direction) {
 export function floodFillSeed(q, x0, y0, from, to, spanFunc) {
   if (from === to) return;
   const stack = (q._ffStack ||= []);
+  // Generous depth cap: far above any real finder/alignment region, but bounded so
+  // huge clutter regions can't exhaust memory (mirrors quirc's fixed stack).
+  const cap = (q._ffCap ||= Math.max(512, q.h * 2));
 
   let sp = 0;
   const first = getFrame(stack, 0);
@@ -77,11 +84,11 @@ export function floodFillSeed(q, x0, y0, from, to, spanFunc) {
     let advanced = false;
 
     if (vars.y > 0) {
-      const nv = callNext(q, from, to, spanFunc, stack, sp, -1);
+      const nv = callNext(q, from, to, spanFunc, stack, sp, -1, cap);
       if (nv >= 0) { sp = nv; advanced = true; }
     }
     if (!advanced && vars.y < q.h - 1) {
-      const nv = callNext(q, from, to, spanFunc, stack, sp, 1);
+      const nv = callNext(q, from, to, spanFunc, stack, sp, 1, cap);
       if (nv >= 0) { sp = nv; advanced = true; }
     }
     if (advanced) continue;

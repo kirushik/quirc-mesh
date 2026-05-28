@@ -202,10 +202,24 @@ function drawOverlay(corners) {
   ctx.stroke();
 }
 
-function tick() {
-  if (running && cam.readyState === cam.HAVE_ENOUGH_DATA) {
+let overlay = null, overlayAt = 0;
+
+// Display loop (rAF): smooth video preview + a detection overlay that fades out
+// shortly after the code leaves the frame.
+function render() {
+  if (cam.readyState === cam.HAVE_ENOUGH_DATA) {
     if (view.width !== cam.videoWidth) { view.width = cam.videoWidth; view.height = cam.videoHeight; }
     ctx.drawImage(cam, 0, 0, view.width, view.height);
+    if (overlay && Date.now() - overlayAt < 300) drawOverlay(overlay);
+  }
+  requestAnimationFrame(render);
+}
+
+// Decode loop: throttled and never overlapping, with a yield (setTimeout) between
+// runs so a heavy frame can't make the page go "unresponsive". Full resolution —
+// v40 needs every pixel near the px/module limit, so do NOT downscale.
+function decodeLoop() {
+  if (running && view.width && cam.readyState === cam.HAVE_ENOUGH_DATA) {
     const img = ctx.getImageData(0, 0, view.width, view.height);
 
     const t0 = performance.now();
@@ -219,7 +233,7 @@ function tick() {
     els.det.textContent = `${dbg.capstones} finders, grids: [${dbg.grids.map((g) => "v" + g.version).join(",") || "none"}]`;
 
     if (r) {
-      drawOverlay(r.corners);
+      overlay = r.corners; overlayAt = Date.now();
       const p = ppm(r.corners, r.version);
       const want = expectedMap[els.expected.value];
       const exact = want != null && r.text === want;
@@ -250,7 +264,7 @@ function tick() {
       els.banner.textContent = "scanning… (no code in frame)";
     }
   }
-  requestAnimationFrame(tick);
+  setTimeout(decodeLoop, 60);
 }
 
 els.device.addEventListener("change", () => start(els.device.value));
@@ -271,7 +285,8 @@ function rfpHint() {
 try {
   await start();
   rfpHint();
-  requestAnimationFrame(tick);
+  render();
+  decodeLoop();
 } catch (e) {
   els.banner.className = "banner fail";
   els.banner.textContent = "camera error: " + (e.message || e);
