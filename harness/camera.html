@@ -54,6 +54,7 @@
     <div class="stat">
       <div>frame</div><div id="s-frame">—</div>
       <div>decode time</div><div id="s-ms">—</div>
+      <div>detection</div><div id="s-det">—</div>
       <div>version / EC</div><div id="s-ver">—</div>
       <div>px / module</div><div id="s-ppm">—</div>
       <div>payload match</div><div id="s-match">—</div>
@@ -65,7 +66,7 @@
 </main>
 
 <script type="module">
-import { decode } from "../src/index.js";
+import { decodeDebug } from "../src/index.js";
 
 const view = document.getElementById("view");
 const ctx = view.getContext("2d", { willReadFrequently: true });
@@ -79,6 +80,7 @@ const els = {
   banner: document.getElementById("banner"),
   frame: document.getElementById("s-frame"),
   ms: document.getElementById("s-ms"),
+  det: document.getElementById("s-det"),
   ver: document.getElementById("s-ver"),
   ppm: document.getElementById("s-ppm"),
   match: document.getElementById("s-match"),
@@ -163,12 +165,14 @@ function tick() {
     const img = ctx.getImageData(0, 0, view.width, view.height);
 
     const t0 = performance.now();
-    let r = null;
-    try { r = decode(img, { mesh: els.mesh.checked, adaptive: els.adaptive.checked }); } catch (e) {}
+    let dbg = { result: null, capstones: 0, grids: [] };
+    try { dbg = decodeDebug(img, { mesh: els.mesh.checked, adaptive: els.adaptive.checked }); } catch (e) {}
     const ms = performance.now() - t0;
+    const r = dbg.result;
 
     els.frame.textContent = `${view.width}×${view.height}`;
     els.ms.textContent = `${ms.toFixed(0)} ms`;
+    els.det.textContent = `${dbg.capstones} finders, grids: [${dbg.grids.map((g) => "v" + g.version).join(",") || "none"}]`;
 
     if (r) {
       drawOverlay(r.corners);

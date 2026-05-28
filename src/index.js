@@ -105,4 +105,24 @@ export function decodeAll(image, opts = {}) {
   return results;
 }
 
-export default { decode, decodeAll };
+// Like decode(), but also returns detection diagnostics — so a camera failure can
+// be attributed to detection (no capstones/grids) vs sampling (grid found, no decode).
+export function decodeDebug(image, opts = {}) {
+  const useMesh = opts.mesh !== false;
+  const q = buildState(image, opts.adaptive === true);
+  detect(q);
+
+  let result = null;
+  for (let i = 0; i < q.grids.length; i++) {
+    const code = extractGrid(q, i, useMesh);
+    const data = tryDecode(code);
+    if (data) { result = buildResult(data, code.corners); break; }
+  }
+  return {
+    result,
+    capstones: q.capstones.length,
+    grids: q.grids.map((g) => ({ version: (g.gridSize - 17) / 4, gridSize: g.gridSize })),
+  };
+}
+
+export default { decode, decodeAll, decodeDebug };
